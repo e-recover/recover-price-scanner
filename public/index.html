@@ -13,7 +13,7 @@
       --success: #48bb78; --warn: #ed8936; --radius: 10px;
     }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem 1rem; }
-    .container { max-width: 860px; margin: 0 auto; }
+    .container { max-width: 900px; margin: 0 auto; }
     header { text-align: center; margin-bottom: 2rem; }
     header .brand { font-size: 9px; letter-spacing: 6px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
     header h1 { font-size: 2rem; font-weight: 700; color: var(--text); }
@@ -35,23 +35,18 @@
     input.mono { font-family: "Courier New", monospace; letter-spacing: 1px; font-size: 1rem; }
     input.asin-found { border-color: var(--success); }
     input.asin-missing { border-color: var(--warn); }
-
     .asin-status { font-size: 0.75rem; margin-top: 0.25rem; }
     .asin-status.found { color: var(--success); }
     .asin-status.missing { color: var(--warn); }
 
-    .search-row { display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap; }
-    .search-row .field { flex: 1; min-width: 200px; }
-    .search-row .market-field { min-width: 200px; }
-
+    .search-row { display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap; margin-top: 1rem; }
     button.btn {
       background: var(--accent); border: none; border-radius: 8px;
       color: #fff; cursor: pointer; font-size: 0.95rem; font-weight: 600;
-      padding: 0.65rem 1.5rem; transition: background 0.2s; white-space: nowrap; align-self: flex-end;
+      padding: 0.65rem 2rem; transition: background 0.2s; white-space: nowrap;
     }
     button.btn:hover { background: var(--accent-hover); }
     button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
     .spinner { display: none; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -63,28 +58,40 @@
     .product-image { width: 90px; height: 90px; object-fit: contain; border-radius: 8px; background: var(--surface2); flex-shrink: 0; }
     .product-placeholder { width: 90px; height: 90px; background: var(--surface2); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 2rem; flex-shrink: 0; }
     .product-meta h2 { font-size: 1.05rem; font-weight: 600; line-height: 1.4; margin-bottom: 0.5rem; }
-    .asin-badge { display: inline-block; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--muted); font-family: "Courier New", monospace; font-size: 0.78rem; padding: 0.2rem 0.5rem; }
-    .amazon-link { display: inline-flex; align-items: center; gap: 0.3rem; margin-top: 0.5rem; color: var(--accent); font-size: 0.85rem; text-decoration: none; }
-    .amazon-link:hover { color: var(--accent-hover); }
+    .asin-badge { display: inline-block; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--muted); font-family: "Courier New", monospace; font-size: 0.78rem; padding: 0.2rem 0.5rem; margin-right: 0.4rem; }
 
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0; }
-    .stat-cell { padding: 1rem 1.25rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    /* Market comparison table */
+    .markets-table-wrap { overflow-x: auto; }
+    table.markets-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    table.markets-table thead tr { border-bottom: 2px solid var(--border); }
+    table.markets-table th { padding: 0.75rem 1rem; text-align: left; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); white-space: nowrap; }
+    table.markets-table td { padding: 0.9rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    table.markets-table tbody tr:last-child td { border-bottom: none; }
+    table.markets-table tbody tr:hover { background: var(--surface2); }
+    .market-cell { display: flex; align-items: center; gap: 0.6rem; font-weight: 600; white-space: nowrap; }
+    .market-flag { font-size: 1.3rem; }
+    .price-val { font-size: 1.05rem; font-weight: 700; }
+    .price-val.highlight { color: var(--success); }
+    .price-val.na { color: var(--muted); font-size: 0.85rem; font-weight: 400; }
+    .best-badge { display: inline-block; background: rgba(72,187,120,0.15); border: 1px solid rgba(72,187,120,0.3); border-radius: 4px; color: var(--success); font-size: 0.65rem; font-weight: 700; padding: 1px 6px; margin-left: 6px; text-transform: uppercase; vertical-align: middle; }
+    .view-link { color: var(--accent); text-decoration: none; font-size: 0.85rem; white-space: nowrap; }
+    .view-link:hover { color: var(--accent-hover); }
+    .scanning-cell { color: var(--muted); font-size: 0.85rem; animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .section-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted); padding: 0.9rem 1rem 0; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0; }
+    .stat-cell { padding: 0.9rem 1rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
     .stat-cell:last-child { border-right: none; }
-    .stat-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 0.35rem; }
-    .stat-value { font-size: 1.1rem; font-weight: 700; color: var(--text); }
-    .stat-value.current { color: var(--accent); }
-    .stat-value.low { color: var(--success); }
-    .stat-value.na { color: var(--muted); font-size: 0.9rem; font-weight: 400; }
-
-    .section-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted); padding: 0.9rem 1.25rem 0; }
-    .token-info { padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); }
+    .stat-label { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 0.3rem; }
+    .stat-value { font-size: 1rem; font-weight: 700; color: var(--text); }
+    .stat-value.na { color: var(--muted); font-size: 0.85rem; font-weight: 400; }
+    .token-info { padding: 0.75rem 1rem; border-top: 1px solid var(--border); font-size: 0.78rem; color: var(--muted); text-align: right; }
 
     @media (max-width: 600px) {
-      .search-row { flex-direction: column; }
-      .btn { width: 100%; }
+      .selector-grid { grid-template-columns: 1fr 1fr; }
       .product-header { flex-direction: column; }
       .stats-grid { grid-template-columns: 1fr 1fr; }
-      .selector-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -96,7 +103,6 @@
     <p>Prezzi Amazon ricondizionato · IT · DE · FR · ES</p>
   </header>
 
-  <!-- Selettore modello -->
   <div class="card">
     <div class="card-title">① Seleziona modello</div>
     <div class="selector-grid">
@@ -122,33 +128,20 @@
       </label>
       <label class="field">
         <span>Colore</span>
-        <select id="sel-color" onchange="updateASIN()" disabled>
+        <select id="sel-color" onchange="updateASINs()" disabled>
           <option value="">— Colore —</option>
         </select>
       </label>
     </div>
-  </div>
 
-  <!-- ASIN + Mercato + Cerca -->
-  <div class="card">
-    <div class="card-title">② ASIN e mercato</div>
     <div class="search-row">
-      <label class="field" style="flex:1;min-width:180px">
-        <span>ASIN</span>
+      <label class="field" style="flex:1;min-width:200px">
+        <span>ASIN (oppure inserisci manualmente)</span>
         <input id="asin-input" class="mono" type="text" placeholder="es. B09MJSL8MR" maxlength="10" autocomplete="off" spellcheck="false" oninput="this.value=this.value.toUpperCase()" />
         <div class="asin-status" id="asin-status"></div>
       </label>
-      <label class="field market-field">
-        <span>Mercato</span>
-        <select id="domain-select">
-          <option value="8">🇮🇹 Amazon.it (IT)</option>
-          <option value="3">🇩🇪 Amazon.de (DE)</option>
-          <option value="4">🇫🇷 Amazon.fr (FR)</option>
-          <option value="9">🇪🇸 Amazon.es (ES)</option>
-        </select>
-      </label>
       <button class="btn" id="search-btn" onclick="doSearch()">
-        <span id="btn-label">Cerca</span>
+        <span id="btn-label">Cerca su tutti i mercati</span>
         <div class="spinner" id="spinner"></div>
       </button>
     </div>
@@ -158,8 +151,6 @@
 </div>
 
 <script>
-// ─── CATALOGO ASIN ────────────────────────────────────────────────────────────
-// Formato: [serie, modello, storage, colore, asin_it, asin_de, asin_fr, asin_es]
 const CATALOG = [
   ["12","iPhone 12 Mini","64GB","Bianco","B08PCDBHFF","B08PCDBHFF","B08PCDBHFF","B08PCDBHFF"],
   ["12","iPhone 12 Mini","64GB","Nero","B08PCF2P4R","B08PCF2P4R","B08PCF2P4R","B08PCF2P4R"],
@@ -453,17 +444,20 @@ const CATALOG = [
   ["SE","iPhone SE 3","256GB","Mezzanotte","","","",""],
 ];
 
-const DOMAIN_URLS = {"8":"https://www.amazon.it/dp/","3":"https://www.amazon.de/dp/","4":"https://www.amazon.fr/dp/","9":"https://www.amazon.es/dp/"};
-const DOMAIN_IDX  = {"8":4,"3":5,"4":6,"9":7}; // index in CATALOG row
+const MARKETS = [
+  {id:"IT", domain:"8", flag:"🇮🇹", name:"Amazon.it", url:"https://www.amazon.it/dp/", idx:4},
+  {id:"DE", domain:"3", flag:"🇩🇪", name:"Amazon.de", url:"https://www.amazon.de/dp/", idx:5},
+  {id:"FR", domain:"4", flag:"🇫🇷", name:"Amazon.fr", url:"https://www.amazon.fr/dp/", idx:6},
+  {id:"ES", domain:"9", flag:"🇪🇸", name:"Amazon.es", url:"https://www.amazon.es/dp/", idx:7},
+];
 
 function unique(arr) { return [...new Set(arr)]; }
 
 function updateModels() {
   const s = document.getElementById("sel-series").value;
-  const rows = CATALOG.filter(r => r[0]===s);
-  const models = unique(rows.map(r=>r[1]));
+  const rows = CATALOG.filter(r=>r[0]===s);
   const sel = document.getElementById("sel-model");
-  sel.innerHTML = '<option value="">— Modello —</option>' + models.map(m=>`<option>${m}</option>`).join("");
+  sel.innerHTML = '<option value="">— Modello —</option>' + unique(rows.map(r=>r[1])).map(m=>`<option>${m}</option>`).join("");
   sel.disabled = false;
   document.getElementById("sel-storage").innerHTML = '<option value="">— Storage —</option>';
   document.getElementById("sel-storage").disabled = true;
@@ -473,188 +467,202 @@ function updateModels() {
 }
 
 function updateStorage() {
-  const s = document.getElementById("sel-series").value;
-  const m = document.getElementById("sel-model").value;
-  const rows = CATALOG.filter(r=>r[0]===s && r[1]===m);
-  const storages = unique(rows.map(r=>r[2]));
-  const sel = document.getElementById("sel-storage");
-  sel.innerHTML = '<option value="">— Storage —</option>' + storages.map(x=>`<option>${x}</option>`).join("");
-  sel.disabled = false;
-  document.getElementById("sel-color").innerHTML = '<option value="">— Colore —</option>';
-  document.getElementById("sel-color").disabled = true;
+  const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value;
+  const rows=CATALOG.filter(r=>r[0]===s&&r[1]===m);
+  const sel=document.getElementById("sel-storage");
+  sel.innerHTML='<option value="">— Storage —</option>'+unique(rows.map(r=>r[2])).map(x=>`<option>${x}</option>`).join("");
+  sel.disabled=false;
+  document.getElementById("sel-color").innerHTML='<option value="">— Colore —</option>';
+  document.getElementById("sel-color").disabled=true;
   clearASIN();
 }
 
 function updateColors() {
-  const s = document.getElementById("sel-series").value;
-  const m = document.getElementById("sel-model").value;
-  const st = document.getElementById("sel-storage").value;
-  const rows = CATALOG.filter(r=>r[0]===s && r[1]===m && r[2]===st);
-  const colors = unique(rows.map(r=>r[3]));
-  const sel = document.getElementById("sel-color");
-  sel.innerHTML = '<option value="">— Colore —</option>' + colors.map(c=>`<option>${c}</option>`).join("");
-  sel.disabled = false;
+  const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value, st=document.getElementById("sel-storage").value;
+  const rows=CATALOG.filter(r=>r[0]===s&&r[1]===m&&r[2]===st);
+  const sel=document.getElementById("sel-color");
+  sel.innerHTML='<option value="">— Colore —</option>'+unique(rows.map(r=>r[3])).map(c=>`<option>${c}</option>`).join("");
+  sel.disabled=false;
   clearASIN();
 }
 
-function updateASIN() {
-  const s  = document.getElementById("sel-series").value;
-  const m  = document.getElementById("sel-model").value;
-  const st = document.getElementById("sel-storage").value;
-  const c  = document.getElementById("sel-color").value;
-  const domain = document.getElementById("domain-select").value;
-  const colIdx = DOMAIN_IDX[domain] || 4;
-  const row = CATALOG.find(r=>r[0]===s && r[1]===m && r[2]===st && r[3]===c);
-  const input  = document.getElementById("asin-input");
-  const status = document.getElementById("asin-status");
+function updateASINs() {
+  const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value;
+  const st=document.getElementById("sel-storage").value, c=document.getElementById("sel-color").value;
+  const row=CATALOG.find(r=>r[0]===s&&r[1]===m&&r[2]===st&&r[3]===c);
+  const input=document.getElementById("asin-input");
+  const status=document.getElementById("asin-status");
   if (row) {
-    const asin = row[colIdx] || row[4] || "";
-    input.value = asin;
+    const asin=row[4]||"";
+    input.value=asin;
     if (asin) {
-      input.className = "mono asin-found";
-      status.className = "asin-status found";
-      status.textContent = "✓ ASIN trovato nel catalogo";
+      input.className="mono asin-found";
+      status.className="asin-status found";
+      status.textContent="✓ ASIN trovato";
     } else {
-      input.className = "mono asin-missing";
-      status.className = "asin-status missing";
-      status.textContent = "⚠ ASIN non ancora inserito — inseriscilo manualmente";
+      input.className="mono asin-missing";
+      status.className="asin-status missing";
+      status.textContent="⚠ ASIN non ancora inserito";
     }
-  } else {
-    clearASIN();
-  }
+  } else { clearASIN(); }
 }
 
 function clearASIN() {
-  const input = document.getElementById("asin-input");
-  input.value = "";
-  input.className = "mono";
-  document.getElementById("asin-status").textContent = "";
+  document.getElementById("asin-input").value="";
+  document.getElementById("asin-input").className="mono";
+  document.getElementById("asin-status").textContent="";
 }
 
-// Aggiorna ASIN quando cambia il mercato
-document.getElementById("domain-select").addEventListener("change", () => {
-  const c = document.getElementById("sel-color").value;
-  if (c) updateASIN();
-});
-
-// ─── KEEPA LOGIC ──────────────────────────────────────────────────────────────
 function formatPrice(cents) {
-  if (cents == null || cents === -1) return null;
-  return "€" + (cents / 100).toFixed(2);
+  if (!cents || cents===-1) return null;
+  return "€"+(cents/100).toFixed(2);
 }
 
-function latestPrice(channel) {
-  if (!channel || channel.length < 2) return null;
-  for (let i = channel.length - 1; i >= 0; i -= 2) {
-    if (channel[i] !== -1) return channel[i];
-  }
+function latestPrice(ch) {
+  if (!ch||ch.length<2) return null;
+  for (let i=ch.length-1;i>=0;i-=2) if (ch[i]!==-1) return ch[i];
   return null;
 }
 
-function statCell(label, value, cls="") {
-  return `<div class="stat-cell"><div class="stat-label">${label}</div><div class="stat-value ${cls}">${value ?? '<span class="na">N/D</span>'}</div></div>`;
+function getBestPrice(csv, stats) {
+  const buyBox = stats?.buyBoxPrice>0 ? stats.buyBoxPrice : null;
+  const refurb = latestPrice(csv[9]);
+  const used   = latestPrice(csv[2]);
+  const newP   = latestPrice(csv[1]);
+  const cands  = [buyBox,refurb,used,newP].filter(v=>v&&v>0);
+  return cands.length ? Math.min(...cands) : null;
 }
 
-function renderResult(data, domain) {
-  const result = document.getElementById("result");
-  if (!data.products || !data.products[0]) {
-    result.innerHTML = `<div class="error-box">Nessun prodotto trovato per questo ASIN.</div>`;
-    result.style.display = "block";
-    return;
-  }
-  const p = data.products[0];
-  const asin = p.asin || "";
-  const title = p.title || "Prodotto sconosciuto";
-  const image = p.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${p.imagesCSV.split(",")[0]}` : null;
-  const amazonUrl = (DOMAIN_URLS[String(domain)]||DOMAIN_URLS["8"]) + asin;
-  const csv = p.csv || [];
-  const stats = p.stats || {};
+function statCell(label,value,cls="") {
+  return `<div class="stat-cell"><div class="stat-label">${label}</div><div class="stat-value ${cls}">${value??'<span class="na">N/D</span>'}</div></div>`;
+}
 
-  const amazonPrice  = latestPrice(csv[0]);
-  const newPrice     = latestPrice(csv[1]);
-  const usedPrice    = latestPrice(csv[2]);
-  const refurbPrice  = latestPrice(csv[9]);
-  const buyBox       = stats.buyBoxPrice > 0 ? stats.buyBoxPrice : null;
-
-  const avg30  = stats.avg?.[1] > 0 ? stats.avg[1] : null;
-  const avg90  = stats.avg?.[2] > 0 ? stats.avg[2] : null;
-  const avg180 = stats.avg?.[3] > 0 ? stats.avg[3] : null;
-
-  const salesRank = p.salesRanks ? Object.values(p.salesRanks)[0] : null;
-  const latestRank = salesRank?.length >= 2 ? salesRank[salesRank.length-1] : null;
-
-  const imgHtml = image
-    ? `<img class="product-image" src="${image}" alt="" onerror="this.style.display='none'" />`
-    : `<div class="product-placeholder">📦</div>`;
-
-  result.innerHTML = `
-    <div class="product-card">
-      <div class="product-header">
-        ${imgHtml}
-        <div class="product-meta">
-          <h2>${title}</h2>
-          <span class="asin-badge">${asin}</span>
-          <a class="amazon-link" href="${amazonUrl}" target="_blank">Apri su Amazon ↗</a>
-        </div>
-      </div>
-      <div class="section-title">Prezzi Attuali</div>
-      <div class="stats-grid">
-        ${statCell("Buy Box", buyBox ? formatPrice(buyBox) : null, buyBox ? "current" : "")}
-        ${statCell("Amazon diretto", amazonPrice ? formatPrice(amazonPrice) : null, amazonPrice ? "current" : "")}
-        ${statCell("Ricondizionato", refurbPrice ? formatPrice(refurbPrice) : null, refurbPrice ? "low" : "")}
-        ${statCell("Usato (tutti gradi)", usedPrice ? formatPrice(usedPrice) : null)}
-        ${statCell("Nuovo (3° parte)", newPrice ? formatPrice(newPrice) : null)}
-      </div>
-      <div class="section-title">Medie Storiche</div>
-      <div class="stats-grid">
-        ${statCell("30 giorni", avg30 ? formatPrice(avg30) : null)}
-        ${statCell("90 giorni", avg90 ? formatPrice(avg90) : null)}
-        ${statCell("180 giorni", avg180 ? formatPrice(avg180) : null)}
-        ${statCell("Ranking vendite", latestRank ? "#"+latestRank.toLocaleString("it-IT") : null)}
-      </div>
-      <div class="token-info">⬡ Token Keepa rimasti: ${data.tokensLeft ?? "N/D"}</div>
-    </div>`;
-  result.style.display = "block";
+async function fetchMarket(asin, domain) {
+  const r=await fetch(`/api/keepa?asin=${encodeURIComponent(asin)}&domain=${encodeURIComponent(domain)}`);
+  const d=await r.json();
+  if (!r.ok) throw new Error(d.error||`HTTP ${r.status}`);
+  return d;
 }
 
 async function doSearch() {
-  const asin   = document.getElementById("asin-input").value.trim().toUpperCase();
-  const domain = document.getElementById("domain-select").value;
-  const btn    = document.getElementById("search-btn");
-  const label  = document.getElementById("btn-label");
-  const spin   = document.getElementById("spinner");
-  const result = document.getElementById("result");
+  const asin=document.getElementById("asin-input").value.trim().toUpperCase();
+  const btn=document.getElementById("search-btn");
+  const lbl=document.getElementById("btn-label");
+  const spin=document.getElementById("spinner");
+  const result=document.getElementById("result");
   if (!asin) { alert("Inserisci un ASIN"); return; }
 
-  btn.disabled = true;
-  label.style.display = "none";
-  spin.style.display = "block";
-  result.style.display = "none";
-  result.innerHTML = "";
+  // Get ASINs per market from catalog
+  const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value;
+  const st=document.getElementById("sel-storage").value, c=document.getElementById("sel-color").value;
+  const row=CATALOG.find(r=>r[0]===s&&r[1]===m&&r[2]===st&&r[3]===c);
 
-  try {
-    const res  = await fetch(`/api/keepa?asin=${encodeURIComponent(asin)}&domain=${encodeURIComponent(domain)}`);
-    const data = await res.json();
-    if (!res.ok) {
-      result.innerHTML = `<div class="error-box">${data.error||"Errore API"}</div>`;
-      result.style.display = "block";
-      return;
+  btn.disabled=true; lbl.style.display="none"; spin.style.display="block";
+  result.style.display="none"; result.innerHTML="";
+
+  // Show scanning table immediately
+  const tableRows = MARKETS.map(mkt=>{
+    const mktAsin = row ? (row[mkt.idx]||asin) : asin;
+    return `<tr id="row-${mkt.id}">
+      <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
+      <td><span class="scanning-cell">⟳ ricerca in corso...</span></td>
+      <td><span class="scanning-cell">...</span></td>
+      <td><span class="scanning-cell">...</span></td>
+      <td><span class="scanning-cell">...</span></td>
+      <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>
+    </tr>`;
+  }).join("");
+
+  result.innerHTML = `<div class="product-card">
+    <div class="product-header">
+      <div class="product-placeholder">📦</div>
+      <div class="product-meta"><h2 id="product-title">Ricerca in corso...</h2><span class="asin-badge" id="product-asin">${asin}</span></div>
+    </div>
+    <div class="markets-table-wrap">
+      <table class="markets-table">
+        <thead><tr>
+          <th>Mercato</th><th>Prezzo Migliore</th><th>Ricondizionato</th><th>Usato</th><th>Nuovo 3°</th><th>Link</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+    <div id="avg-section"></div>
+    <div class="token-info" id="token-info"></div>
+  </div>`;
+  result.style.display="block";
+
+  // Fetch each market sequentially
+  let title=null, image=null, lastTokens=null;
+  const prices=[];
+
+  for (let i=0;i<MARKETS.length;i++) {
+    const mkt=MARKETS[i];
+    const mktAsin=row?(row[mkt.idx]||asin):asin;
+    const rowEl=document.getElementById(`row-${mkt.id}`);
+
+    try {
+      const data=await fetchMarket(mktAsin, mkt.domain);
+      const p=data?.products?.[0];
+      if (!p) throw new Error("N/D");
+
+      if (!title && p.title) {
+        title=p.title;
+        document.getElementById("product-title").textContent=title;
+        if (p.imagesCSV) {
+          const imgSrc=`https://images-na.ssl-images-amazon.com/images/I/${p.imagesCSV.split(",")[0]}`;
+          document.querySelector(".product-placeholder").outerHTML=`<img class="product-image" src="${imgSrc}" alt="" onerror="this.style.display='none'" />`;
+        }
+      }
+      if (data.tokensLeft!=null) {
+        lastTokens=data.tokensLeft;
+        document.getElementById("token-info").textContent=`⬡ Token Keepa rimasti: ${lastTokens}`;
+      }
+
+      const csv=p.csv||[];
+      const stats=p.stats||{};
+      const best=getBestPrice(csv,stats);
+      const refurb=latestPrice(csv[9]);
+      const used=latestPrice(csv[2]);
+      const newP=latestPrice(csv[1]);
+      if (best) prices.push(best);
+
+      rowEl.innerHTML=`
+        <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
+        <td><span class="price-val">${formatPrice(best)||'<span class="na">N/D</span>'}</span></td>
+        <td><span class="price-val">${formatPrice(refurb)||'<span class="na">—</span>'}</span></td>
+        <td><span class="price-val">${formatPrice(used)||'<span class="na">—</span>'}</span></td>
+        <td><span class="price-val">${formatPrice(newP)||'<span class="na">—</span>'}</span></td>
+        <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
+
+    } catch(e) {
+      rowEl.innerHTML=`
+        <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
+        <td colspan="4"><span class="price-val na">${e.message||"Errore"}</span></td>
+        <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
     }
-    renderResult(data, domain);
-  } catch(e) {
-    result.innerHTML = `<div class="error-box">Errore di rete.</div>`;
-    result.style.display = "block";
-  } finally {
-    btn.disabled = false;
-    label.style.display = "inline";
-    spin.style.display = "none";
+
+    if (i<MARKETS.length-1) await new Promise(r=>setTimeout(r,1500));
   }
+
+  // Highlight best price
+  if (prices.length) {
+    const minPrice=Math.min(...prices);
+    document.querySelectorAll("table.markets-table tbody tr").forEach(tr=>{
+      const priceEl=tr.querySelector(".price-val");
+      if (priceEl) {
+        const val=parseFloat(priceEl.textContent.replace("€",""));
+        if (val===minPrice/100) {
+          priceEl.classList.add("highlight");
+          priceEl.innerHTML+=`<span class="best-badge">Migliore</span>`;
+        }
+      }
+    });
+  }
+
+  btn.disabled=false; lbl.style.display="inline"; spin.style.display="none";
 }
 
-// Enter key support
-document.getElementById("asin-input").addEventListener("keydown", e => {
-  if (e.key === "Enter") doSearch();
-});
+document.getElementById("asin-input").addEventListener("keydown", e=>{ if(e.key==="Enter") doSearch(); });
 </script>
 </body>
 </html>
