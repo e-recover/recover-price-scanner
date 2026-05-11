@@ -581,7 +581,7 @@ async function doSearch() {
     <div class="markets-table-wrap">
       <table class="markets-table">
         <thead><tr>
-          <th>Mercato</th><th>Prezzo Migliore</th><th>Ricondizionato</th><th>Usato</th><th>Nuovo 3°</th><th>Link</th>
+          <th>Mercato</th><th>Prezzo Migliore</th><th>Ricondizionato</th><th>Usato</th><th>Eccellente</th><th>Link</th>
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>
@@ -644,16 +644,24 @@ async function doSearch() {
     if (i<MARKETS.length-1) await new Promise(r=>setTimeout(r,1500));
   }
 
-  // Highlight best price
-  if (prices.length) {
-    const minPrice=Math.min(...prices);
+  // Highlight highest Eccellente (Nuovo 3° = csv[1]) price
+  const newPrices = [];
+  document.querySelectorAll("table.markets-table tbody tr").forEach(tr=>{
+    const cells = tr.querySelectorAll("td .price-val");
+    if (cells[3]) {
+      const val = parseFloat(cells[3].textContent.replace("€",""));
+      if (!isNaN(val)) newPrices.push(val);
+    }
+  });
+  if (newPrices.length) {
+    const maxNewPrice = Math.max(...newPrices);
     document.querySelectorAll("table.markets-table tbody tr").forEach(tr=>{
-      const priceEl=tr.querySelector(".price-val");
-      if (priceEl) {
-        const val=parseFloat(priceEl.textContent.replace("€",""));
-        if (val===minPrice/100) {
-          priceEl.classList.add("highlight");
-          priceEl.innerHTML+=`<span class="best-badge">Migliore</span>`;
+      const cells = tr.querySelectorAll("td .price-val");
+      if (cells[3]) {
+        const val = parseFloat(cells[3].textContent.replace("€",""));
+        if (val === maxNewPrice) {
+          cells[3].classList.add("highlight");
+          cells[3].innerHTML += `<span class="best-badge">↑ Vendi qui</span>`;
         }
       }
     });
