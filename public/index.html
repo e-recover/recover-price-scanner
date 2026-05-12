@@ -100,9 +100,15 @@
   <header>
     <div class="brand">Recover Srl — Padova · Vicenza</div>
     <h1>📱 Price Scanner</h1>
-    <p>Prezzi Amazon ricondizionato · IT · DE · FR · ES</p>
+    <p>Prezzi Amazon · Back Market · IT · DE · FR · ES · NL</p>
   </header>
 
+  <div style="display:flex;gap:8px;margin-bottom:16px;">
+    <button onclick="showMainTab('amazon')" id="tab-amazon" style="padding:8px 18px;border-radius:8px;border:1px solid #4f8ef7;background:rgba(79,142,247,0.15);color:#4f8ef7;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">🛒 Amazon</button>
+    <button onclick="showMainTab('backmarket')" id="tab-bm" style="padding:8px 18px;border-radius:8px;border:1px solid #2e3350;background:transparent;color:#8890aa;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">🔄 Back Market</button>
+  </div>
+
+  <div id="amazon-section">
   <div class="card">
     <div class="card-title">① Seleziona modello</div>
     <div class="selector-grid">
@@ -148,8 +154,137 @@
   </div>
 
   <div id="result"></div>
+  </div><!-- end amazon-section -->
+
+  <!-- BACK MARKET SECTION -->
+  <div id="bm-section" style="display:none;">
+    <div class="card">
+      <div class="card-title">Back Market — Prezzi BuyBox per paese</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+        <input id="bm-search" placeholder="Cerca per modello o SKU..." oninput="filterBM()" style="flex:1;min-width:200px;background:#0f1117;border:1px solid #2e3350;border-radius:8px;color:#e8eaf0;font-size:12px;padding:8px 12px;font-family:inherit;outline:none;" />
+        <button onclick="loadBMData()" id="bm-load-btn" style="padding:8px 18px;border-radius:8px;border:1px solid rgba(72,187,120,0.4);background:rgba(72,187,120,0.1);color:#48bb78;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;">⟳ Carica dati</button>
+      </div>
+      <div id="bm-status" style="font-size:11px;color:#8890aa;margin-bottom:8px;"></div>
+    </div>
+
+    <div id="bm-table-wrap"></div>
+  </div>
 </div>
 
+<script>
+function showMainTab(tab) {
+  document.getElementById('amazon-section').style.display = tab==='amazon' ? 'block' : 'none';
+  document.getElementById('bm-section').style.display = tab==='backmarket' ? 'block' : 'none';
+  document.getElementById('tab-amazon').style.borderColor = tab==='amazon' ? '#4f8ef7' : '#2e3350';
+  document.getElementById('tab-amazon').style.background = tab==='amazon' ? 'rgba(79,142,247,0.15)' : 'transparent';
+  document.getElementById('tab-amazon').style.color = tab==='amazon' ? '#4f8ef7' : '#8890aa';
+  document.getElementById('tab-bm').style.borderColor = tab==='backmarket' ? '#4f8ef7' : '#2e3350';
+  document.getElementById('tab-bm').style.background = tab==='backmarket' ? 'rgba(79,142,247,0.15)' : 'transparent';
+  document.getElementById('tab-bm').style.color = tab==='backmarket' ? '#4f8ef7' : '#8890aa';
+}
+
+// ─── BACK MARKET ─────────────────────────────────────────────────────────────
+let bmData = null;
+const BM_FLAGS = {it:'🇮🇹',fr:'🇫🇷',de:'🇩🇪',es:'🇪🇸',nl:'🇳🇱'};
+const BM_COUNTRIES = ['it','fr','de','es','nl'];
+const GRADE_LABELS = {EXCELLENT:'Eccellente',VERY_GOOD:'Molto buono',GOOD:'Buono'};
+
+async function loadBMData() {
+  const btn = document.getElementById('bm-load-btn');
+  const status = document.getElementById('bm-status');
+  btn.textContent = '⟳ Caricamento...';
+  btn.disabled = true;
+  status.textContent = 'Recupero dati da IT, FR, DE, ES, NL...';
+
+  try {
+    const r = await fetch('/api/backmarket/all');
+    const data = await r.json();
+    bmData = data;
+
+    // Build unified product map by backmarket_id
+    const products = {};
+    for (const country of BM_COUNTRIES) {
+      for (const listing of (data[country] || [])) {
+        const bid = listing.backmarket_id;
+        if (!products[bid]) products[bid] = { sku: listing.sku, title: listing.title, grade: listing.grade, countries: {} };
+        products[bid].countries[country] = {
+          price: listing.price,
+          min_price: listing.min_price,
+          max_price: listing.max_price,
+          state: listing.publication_state,
+        };
+      }
+    }
+
+    bmData._products = products;
+    renderBMTable(products);
+    status.textContent = `✓ ${Object.keys(products).length} prodotti caricati`;
+  } catch(e) {
+    status.textContent = 'Errore: ' + e.message;
+  }
+
+  btn.textContent = '⟳ Aggiorna';
+  btn.disabled = false;
+}
+
+function filterBM() {
+  if (!bmData?._products) return;
+  const q = document.getElementById('bm-search').value.toLowerCase().trim();
+  const filtered = {};
+  for (const [bid, p] of Object.entries(bmData._products)) {
+    if (!q || p.sku?.toLowerCase().includes(q) || p.title?.toLowerCase().includes(q)) {
+      filtered[bid] = p;
+    }
+  }
+  renderBMTable(filtered);
+}
+
+function renderBMTable(products) {
+  const wrap = document.getElementById('bm-table-wrap');
+  const entries = Object.entries(products);
+
+  if (!entries.length) {
+    wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#8890aa;">Nessun risultato</div>';
+    return;
+  }
+
+  const rows = entries.map(([bid, p]) => {
+    const cCells = BM_COUNTRIES.map(c => {
+      const d = p.countries[c];
+      if (!d) return `<td style="padding:7px 10px;color:#2e3350;text-align:center;">—</td>`;
+      const price = d.price ? '€'+parseFloat(d.price).toFixed(0) : '—';
+      const bb = d.max_price ? '€'+d.max_price : '—';
+      const isActive = d.state === 3;
+      return `<td style="padding:7px 10px;text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:${isActive?'#48bb78':'#8890aa'}">${price}</div>
+        <div style="font-size:9px;color:#4f8ef7;">BB: ${bb}</div>
+      </td>`;
+    }).join('');
+
+    return `<tr style="border-bottom:1px solid rgba(46,51,80,0.5);">
+      <td style="padding:7px 10px;">
+        <div style="font-size:11px;font-weight:600;color:#e8eaf0;">${p.sku||'—'}</div>
+        <div style="font-size:9px;color:#8890aa;margin-top:1px;">${GRADE_LABELS[p.grade]||p.grade} · BM#${bid}</div>
+      </td>
+      ${cCells}
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `<div style="background:#1a1d27;border:1px solid #2e3350;border-radius:10px;overflow:hidden;">
+    <div style="overflow-x:auto;max-height:60vh;overflow-y:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead style="position:sticky;top:0;background:#1a1d27;">
+          <tr style="border-bottom:2px solid #2e3350;">
+            <th style="padding:8px 10px;text-align:left;font-size:9px;color:#8890aa;text-transform:uppercase;letter-spacing:1px;">Prodotto</th>
+            ${BM_COUNTRIES.map(c=>`<th style="padding:8px 10px;text-align:center;font-size:12px;">${BM_FLAGS[c]}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+</script>
 <script>
 const CATALOG = [
   ["12","iPhone 12 Mini","64GB","Bianco","B08PCDBHFF","B08PCDBHFF","B08PCDBHFF","B08PCDBHFF"],
