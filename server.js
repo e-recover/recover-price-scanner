@@ -14,7 +14,8 @@ app.get("/api/keepa", async (req, res) => {
   if (!KEEPA_KEY) return res.status(500).json({ error: "Keepa API key not configured" });
 
   try {
-    const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1`;
+    // offers=20 returns live offers with individual prices + shipping
+    const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1&offers=20&only-live-offers=1`;
     const response = await fetch(url);
     const data = await response.json();
     if (!response.ok) throw new Error(`Keepa API error: ${response.status}`);
