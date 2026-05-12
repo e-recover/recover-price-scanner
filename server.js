@@ -46,9 +46,8 @@ app.get("/api/backmarket/listings", async (req, res) => {
   }
 });
 
-// Get BuyBox prices for any product across all countries
-app.get("/api/backmarket/price", async (req, res) => {
-  const { id } = req.query;
+// Get listings for all countries
+app.get("/api/backmarket/all", async (req, res) => {
   if (!BM_KEY) return res.status(500).json({ error: "Back Market API key not configured" });
 
   const countries = [
@@ -57,26 +56,31 @@ app.get("/api/backmarket/price", async (req, res) => {
     { code:"de", host:"https://www.backmarket.de", lang:"de-de" },
     { code:"es", host:"https://www.backmarket.es", lang:"es-es" },
     { code:"nl", host:"https://www.backmarket.nl", lang:"nl-nl" },
-    { code:"be", host:"https://www.backmarket.be", lang:"fr-be" },
   ];
 
   const results = {};
 
   for (const c of countries) {
     try {
-      // Try endpoint with numeric Back Market ID
-      const url = `${c.host}/ws/listings/${id}`;
-      const r = await fetch(url, {
-        headers: {
-          "Authorization": `Basic ${BM_KEY}`,
-          "Accept": "application/json",
-          "Accept-Language": c.lang,
-        }
-      });
-      const data = await r.json();
-      results[c.code] = { status: r.status, data };
+      let allListings = [];
+      let url = `${c.host}/ws/listings?page=1`;
+      
+      while (url) {
+        const r = await fetch(url, {
+          headers: {
+            "Authorization": `Basic ${BM_KEY}`,
+            "Accept": "application/json",
+            "Accept-Language": c.lang,
+          }
+        });
+        const data = await r.json();
+        if (!r.ok) break;
+        allListings = allListings.concat(data.results || []);
+        url = data.next || null;
+      }
+      results[c.code] = allListings;
     } catch(e) {
-      results[c.code] = { error: e.message };
+      results[c.code] = [];
     }
   }
 
