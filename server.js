@@ -15,7 +15,7 @@ app.get("/api/keepa", async (req, res) => {
 
   try {
     // offers=20 returns live offers with individual prices + shipping
-    const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1&offers=20&only-live-offers=1`;
+    const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1&offers=10&only-live-offers=1`;
     const response = await fetch(url);
     const data = await response.json();
     if (!response.ok) throw new Error(`Keepa API error: ${response.status}`);
