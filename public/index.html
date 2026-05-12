@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -620,47 +621,10 @@ async function doSearch() {
 
       const csv=p.csv||[];
       const stats=p.stats||{};
-      const offers=p.offers||[];
-      const liveIdx=p.liveOffersOrder||[];
-
-      // Get lowest total price (product + shipping) from live offers by condition
-      // condition: 1=new, 2=used_like_new, 3=used_very_good, 4=used_good, 5=used_acceptable, 6=refurbished/renewed
-      function lowestOfferTotal(conditionFn) {
-        let min=null;
-        for (const idx of liveIdx) {
-          const o=offers[idx];
-          if (!o||!conditionFn(o.condition)) continue;
-          const offerCSV=o.offerCSV||[];
-          // offerCSV alternates [time, price, time, price...], price in cents
-          let price=null;
-          for (let j=offerCSV.length-1;j>=0;j-=2) {
-            if (offerCSV[j]>0){price=offerCSV[j];break;}
-          }
-          if (!price) continue;
-          const shipping=o.shippingCSV?.[o.shippingCSV.length-1]||0;
-          const total=price+(shipping>0?shipping:0);
-          if (!min||total<min) min=total;
-        }
-        return min;
-      }
-
-      // Eccellente = condition 2 (like_new) or 6 (refurbished/renewed)
-      const excellentTotal = lowestOfferTotal(c=>c===2||c===6);
-      // Usato = any used condition (2,3,4,5)
-      const usedTotal = lowestOfferTotal(c=>c>=2&&c<=5);
-      // Ricondizionato = condition 6
-      const refurbTotal = lowestOfferTotal(c=>c===6);
-
-      // Fallback to csv if no offers
-      const refurbFallback = latestPrice(csv[9]);
-      const usedFallback = latestPrice(csv[2]);
-      const newFallback = latestPrice(csv[1]);
-
-      const best = excellentTotal || usedTotal || getBestPrice(csv,stats);
-      const refurb = refurbTotal || refurbFallback;
-      const used = usedTotal || usedFallback;
-      const excellent = excellentTotal || newFallback;
-
+      const best=getBestPrice(csv,stats);
+      const refurb=latestPrice(csv[9]);
+      const used=latestPrice(csv[2]);
+      const newP=latestPrice(csv[1]);
       if (best) prices.push(best);
 
       rowEl.innerHTML=`
@@ -668,7 +632,7 @@ async function doSearch() {
         <td><span class="price-val">${formatPrice(best)||'<span class="na">N/D</span>'}</span></td>
         <td><span class="price-val">${formatPrice(refurb)||'<span class="na">—</span>'}</span></td>
         <td><span class="price-val">${formatPrice(used)||'<span class="na">—</span>'}</span></td>
-        <td><span class="price-val">${formatPrice(excellent)||'<span class="na">—</span>'}</span></td>
+        <td><span class="price-val">${formatPrice(newP)||'<span class="na">—</span>'}</span></td>
         <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
 
     } catch(e) {
