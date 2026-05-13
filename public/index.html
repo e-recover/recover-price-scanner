@@ -703,35 +703,47 @@ function calcMarginCell(buyPrice, sellPrice) {
   return `<span style="font-weight:700;color:${color}">€${net.toFixed(0)}</span>`;
 }
 
-function formatPrice(cents) {
-  if (!cents || cents===-1) return null;
-  return "€"+(cents/100).toFixed(2);
+function parseNinjaPrice(str) {
+  if (!str) return null;
+  const n = parseFloat(str.replace(/[^\d,\.]/g,'').replace(',','.'));
+  return isNaN(n) ? null : n;
 }
 
-function latestPrice(ch) {
-  if (!ch||ch.length<2) return null;
-  for (let i=ch.length-1;i>=0;i-=2) if (ch[i]!==-1) return ch[i];
-  return null;
+function getLowestByCondition(offers, conditionKeyword) {
+  if (!offers || !offers.length) return null;
+  let min = null;
+  for (const o of offers) {
+    const cond = (o.product_condition||'').toLowerCase();
+    if (!cond.includes(conditionKeyword)) continue;
+    const price = parseNinjaPrice(o.product_price);
+    const ship = parseNinjaPrice(o.delivery_price) || 0;
+    if (price === null) continue;
+    const total = price + ship;
+    if (min === null || total < min) min = total;
+  }
+  return min;
 }
 
-function getBestPrice(csv, stats) {
-  const buyBox = stats?.buyBoxPrice>0 ? stats.buyBoxPrice : null;
-  const refurb = latestPrice(csv[9]);
-  const used   = latestPrice(csv[2]);
-  const newP   = latestPrice(csv[1]);
-  const cands  = [buyBox,refurb,used,newP].filter(v=>v&&v>0);
-  return cands.length ? Math.min(...cands) : null;
+function getBuyBoxPrice(data) {
+  // Try buy_boxes first
+  if (data.buy_boxes && data.buy_boxes.length) {
+    const bb = data.buy_boxes[0];
+    return parseNinjaPrice(bb.price);
+  }
+  // Fallback to product_price
+  return parseNinjaPrice(data.product_price);
 }
 
-function statCell(label,value,cls="") {
-  return `<div class="stat-cell"><div class="stat-label">${label}</div><div class="stat-value ${cls}">${value??'<span class="na">N/D</span>'}</div></div>`;
-}
+// Domain mapping for Ninja (country codes)
+const NINJA_COUNTRY = {IT:"IT", DE:"DE", FR:"FR", ES:"ES"};
 
-async function fetchMarket(asin, domain) {
-  const r=await fetch(`/api/keepa?asin=${encodeURIComponent(asin)}&domain=${encodeURIComponent(domain)}`);
-  const d=await r.json();
-  if (!r.ok) throw new Error(d.error||`HTTP ${r.status}`);
-  return d;
+async function fetchMarket(asin, mkt) {
+  const country = NINJA_COUNTRY[mkt.id] || mkt.id;
+  const r = await fetch(`/api/ninja?asin=${encodeURIComponent(asin)}&domain=${country}`);
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.message||`HTTP ${r.status}`);
+  if (d.status !== "OK") throw new Error(d.message||"Errore API");
+  return d.data;
 }
 
 async function doSearch() {
@@ -742,7 +754,6 @@ async function doSearch() {
   const result=document.getElementById("result");
   if (!asin) { alert("Inserisci un ASIN"); return; }
 
-  // Get ASINs per market from catalog
   const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value;
   const st=document.getElementById("sel-storage").value, c=document.getElementById("sel-color").value;
   const row=CATALOG.find(r=>r[0]===s&&r[1]===m&&r[2]===st&&r[3]===c);
@@ -750,14 +761,11 @@ async function doSearch() {
   btn.disabled=true; lbl.style.display="none"; spin.style.display="block";
   result.style.display="none"; result.innerHTML="";
 
-  // Show scanning table immediately
   const tableRows = MARKETS.map(mkt=>{
     const mktAsin = row ? (row[mkt.idx]||asin) : asin;
     return `<tr id="row-${mkt.id}">
       <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
       <td><span class="scanning-cell">⟳ ricerca in corso...</span></td>
-      <td><span class="scanning-cell">...</span></td>
-      <td><span class="scanning-cell">...</span></td>
       <td><span class="scanning-cell">...</span></td>
       <td><span class="scanning-cell">...</span></td>
       <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>
@@ -772,19 +780,17 @@ async function doSearch() {
     <div class="markets-table-wrap">
       <table class="markets-table">
         <thead><tr>
-          <th>Mercato</th><th>Prezzo Migliore</th><th>Ricondizionato</th><th>Usato</th><th>Eccellente</th><th>Guadagno netto</th><th>Link</th>
+          <th>Mercato</th><th>Buy Box</th><th>Eccellente</th><th>Guadagno netto</th><th>Link</th>
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>
     </div>
-    <div id="avg-section"></div>
     <div class="token-info" id="token-info"></div>
   </div>`;
   result.style.display="block";
 
-  // Fetch each market sequentially
-  let title=null, image=null, lastTokens=null;
-  const prices=[];
+  let title=null, image=null;
+  const excellentPrices=[];
 
   for (let i=0;i<MARKETS.length;i++) {
     const mkt=MARKETS[i];
@@ -792,74 +798,53 @@ async function doSearch() {
     const rowEl=document.getElementById(`row-${mkt.id}`);
 
     try {
-      const data=await fetchMarket(mktAsin, mkt.domain);
-      const p=data?.products?.[0];
-      if (!p) throw new Error("N/D");
+      const data = await fetchMarket(mktAsin, mkt);
 
-      if (!title && p.title) {
-        title=p.title;
-        document.getElementById("product-title").textContent=title;
-        if (p.imagesCSV) {
-          const imgSrc=`https://images-na.ssl-images-amazon.com/images/I/${p.imagesCSV.split(",")[0]}`;
-          document.querySelector(".product-placeholder").outerHTML=`<img class="product-image" src="${imgSrc}" alt="" onerror="this.style.display='none'" />`;
+      if (!title && data.product_title) {
+        title = data.product_title;
+        document.getElementById("product-title").textContent = title;
+        if (data.product_photo) {
+          document.querySelector(".product-placeholder").outerHTML=`<img class="product-image" src="${data.product_photo}" alt="" onerror="this.style.display='none'" />`;
         }
       }
-      if (data.tokensLeft!=null) {
-        lastTokens=data.tokensLeft;
-        document.getElementById("token-info").textContent=`⬡ Token Keepa rimasti: ${lastTokens}`;
-      }
 
-      const csv=p.csv||[];
-      const stats=p.stats||{};
-      const best=getBestPrice(csv,stats);
-      const refurb=latestPrice(csv[9]);
-      const used=latestPrice(csv[2]);
-      const newP=latestPrice(csv[1]);
-      if (best) prices.push(best);
+      const buyBox = getBuyBoxPrice(data);
+      const excellent = getLowestByCondition(data.product_offers, 'excellent');
 
-      // Margin calculation
       const buyPrice = parseFloat(document.getElementById("buy-price").value)||0;
-      const sellPrice = newP ? newP/100 : (best ? best/100 : 0);
+      const sellPrice = excellent || buyBox || 0;
       const marginCell = calcMarginCell(buyPrice, sellPrice);
+
+      if (excellent) excellentPrices.push({mkt, val: excellent});
+
+      const bbStr = buyBox ? `€${buyBox.toFixed(2)}` : '<span class="na">N/D</span>';
+      const exStr = excellent ? `<span class="price-val" data-val="${excellent}">€${excellent.toFixed(2)}</span>` : '<span class="price-val na">—</span>';
 
       rowEl.innerHTML=`
         <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
-        <td><span class="price-val">${formatPrice(best)||'<span class="na">N/D</span>'}</span></td>
-        <td><span class="price-val">${formatPrice(refurb)||'<span class="na">—</span>'}</span></td>
-        <td><span class="price-val">${formatPrice(used)||'<span class="na">—</span>'}</span></td>
-        <td><span class="price-val">${formatPrice(newP)||'<span class="na">—</span>'}</span></td>
+        <td><span class="price-val">${bbStr}</span></td>
+        <td>${exStr}</td>
         <td>${marginCell}</td>
         <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
 
     } catch(e) {
       rowEl.innerHTML=`
         <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
-        <td colspan="5"><span class="price-val na">${e.message||"Errore"}</span></td>
+        <td colspan="3"><span class="price-val na">${e.message||"Errore"}</span></td>
         <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
     }
 
-    if (i<MARKETS.length-1) await new Promise(r=>setTimeout(r,1500));
+    if (i<MARKETS.length-1) await new Promise(r=>setTimeout(r,500));
   }
 
-  // Highlight highest Eccellente (Nuovo 3° = csv[1]) price
-  const newPrices = [];
-  document.querySelectorAll("table.markets-table tbody tr").forEach(tr=>{
-    const cells = tr.querySelectorAll("td .price-val");
-    if (cells[3]) {
-      const val = parseFloat(cells[3].textContent.replace("€",""));
-      if (!isNaN(val)) newPrices.push(val);
-    }
-  });
-  if (newPrices.length) {
-    const maxNewPrice = Math.max(...newPrices);
-    document.querySelectorAll("table.markets-table tbody tr").forEach(tr=>{
-      const cells = tr.querySelectorAll("td .price-val");
-      if (cells[3]) {
-        const val = parseFloat(cells[3].textContent.replace("€",""));
-        if (val === maxNewPrice) {
-          cells[3].classList.add("highlight");
-          cells[3].innerHTML += `<span class="best-badge">↑ Vendi qui</span>`;
-        }
+  // Highlight highest Eccellente price
+  if (excellentPrices.length) {
+    const maxVal = Math.max(...excellentPrices.map(x=>x.val));
+    document.querySelectorAll("table.markets-table tbody tr td .price-val[data-val]").forEach(el=>{
+      const v = parseFloat(el.getAttribute("data-val"));
+      if (v === maxVal) {
+        el.classList.add("highlight");
+        el.innerHTML += `<span class="best-badge">↑ Vendi qui</span>`;
       }
     });
   }
