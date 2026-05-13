@@ -1,14 +1,14 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const path = require("path");
- 
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const KEEPA_KEY = process.env.KEEPA_API_KEY;
 const BM_KEY = process.env.BM_API_KEY;
- 
+
 app.use(express.static(path.join(__dirname, "public")));
- 
+
 app.get("/api/keepa", async (req, res) => {
   const { asin, domain } = req.query;
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
@@ -23,11 +23,11 @@ app.get("/api/keepa", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
- 
+
 app.get("/api/ninja", async (req, res) => {
   const { asin, domain } = req.query;
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
-  const key = "ak_xrvezijzljlnxc85zqak759v0pjg1z1vr1p0m13purxtsck";
+  const key = "06373c312emshcdbda3da9d2a3b1p16500cjsna8804749f0c5";
   try {
     const url = `https://real-time-amazon-data.p.rapidapi.com/offers-v2?asin=${asin}&country=${domain.toUpperCase()}&limit=20`;
     const response = await fetch(url, {
@@ -42,7 +42,7 @@ app.get("/api/ninja", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
- 
+
 app.get("/api/backmarket/listings", async (req, res) => {
   if (!BM_KEY) return res.status(500).json({ error: "Back Market API key not configured" });
   try {
@@ -59,7 +59,7 @@ app.get("/api/backmarket/listings", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
- 
+
 app.get("/api/backmarket/all", async (req, res) => {
   if (!BM_KEY) return res.status(500).json({ error: "Back Market API key not configured" });
   const countries = [
@@ -94,7 +94,7 @@ app.get("/api/backmarket/all", async (req, res) => {
   }
   res.json(results);
 });
- 
+
 app.listen(PORT, () => {
   console.log(`Recover Price Scanner running on port ${PORT}`);
 });
