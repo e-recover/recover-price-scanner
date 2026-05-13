@@ -106,6 +106,7 @@
   <div style="display:flex;gap:8px;margin-bottom:16px;">
     <button onclick="showMainTab('amazon')" id="tab-amazon" style="padding:8px 18px;border-radius:8px;border:1px solid #4f8ef7;background:rgba(79,142,247,0.15);color:#4f8ef7;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">🛒 Amazon</button>
     <button onclick="showMainTab('backmarket')" id="tab-bm" style="padding:8px 18px;border-radius:8px;border:1px solid #2e3350;background:transparent;color:#8890aa;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">🔄 Back Market</button>
+    <button onclick="showMainTab('report')" id="tab-report" style="padding:8px 18px;border-radius:8px;border:1px solid #2e3350;background:transparent;color:#8890aa;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">📊 Report Fornitore</button>
   </div>
 
   <div id="amazon-section">
@@ -173,18 +174,34 @@
 
     <div id="bm-table-wrap"></div>
   </div>
+
+  <!-- REPORT FORNITORE SECTION -->
+  <div id="report-section" style="display:none;">
+    <div class="card">
+      <div class="card-title">📊 Report Margine — Fornitore NL (13/05/2026)</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+        <input id="report-search" placeholder="Cerca modello..." oninput="filterReport()" style="flex:1;min-width:200px;background:#0f1117;border:1px solid #2e3350;border-radius:8px;color:#e8eaf0;font-size:12px;padding:8px 12px;font-family:inherit;outline:none;" />
+        <button onclick="runReport()" id="report-btn" style="padding:8px 18px;border-radius:8px;border:1px solid rgba(245,158,11,0.4);background:rgba(245,158,11,0.1);color:#f59e0b;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;">▶ Avvia scansione prezzi</button>
+      </div>
+      <div id="report-status" style="font-size:11px;color:#8890aa;margin-bottom:8px;"></div>
+    </div>
+    <div id="report-table-wrap"></div>
+  </div>
 </div>
 
 <script>
 function showMainTab(tab) {
   document.getElementById('amazon-section').style.display = tab==='amazon' ? 'block' : 'none';
   document.getElementById('bm-section').style.display = tab==='backmarket' ? 'block' : 'none';
-  document.getElementById('tab-amazon').style.borderColor = tab==='amazon' ? '#4f8ef7' : '#2e3350';
-  document.getElementById('tab-amazon').style.background = tab==='amazon' ? 'rgba(79,142,247,0.15)' : 'transparent';
-  document.getElementById('tab-amazon').style.color = tab==='amazon' ? '#4f8ef7' : '#8890aa';
-  document.getElementById('tab-bm').style.borderColor = tab==='backmarket' ? '#4f8ef7' : '#2e3350';
-  document.getElementById('tab-bm').style.background = tab==='backmarket' ? 'rgba(79,142,247,0.15)' : 'transparent';
-  document.getElementById('tab-bm').style.color = tab==='backmarket' ? '#4f8ef7' : '#8890aa';
+  document.getElementById('report-section').style.display = tab==='report' ? 'block' : 'none';
+  ['amazon','bm','report'].forEach(t => {
+    const id = t==='amazon' ? 'tab-amazon' : t==='bm' ? 'tab-bm' : 'tab-report';
+    const active = (t==='amazon'&&tab==='amazon')||(t==='bm'&&tab==='backmarket')||(t==='report'&&tab==='report');
+    const el = document.getElementById(id);
+    el.style.borderColor = active ? '#4f8ef7' : '#2e3350';
+    el.style.background = active ? 'rgba(79,142,247,0.15)' : 'transparent';
+    el.style.color = active ? '#4f8ef7' : '#8890aa';
+  });
 }
 
 // ─── BACK MARKET ─────────────────────────────────────────────────────────────
@@ -860,6 +877,218 @@ async function doSearch() {
 }
 
 document.getElementById("asin-input").addEventListener("keydown", e=>{ if(e.key==="Enter") doSearch(); });
+
+// ─── REPORT FORNITORE ─────────────────────────────────────────────────────────
+const SUPPLIER_NL = [
+  {modello:"iPhone 8 64GB", prezzo_acquisto:45},
+  {modello:"iPhone 8 128GB", prezzo_acquisto:55},
+  {modello:"iPhone 8 256GB", prezzo_acquisto:65},
+  {modello:"iPhone 8 Plus 64GB", prezzo_acquisto:55},
+  {modello:"iPhone 8 Plus 128GB", prezzo_acquisto:65},
+  {modello:"iPhone 8 Plus 256GB", prezzo_acquisto:75},
+  {modello:"iPhone X 64GB", prezzo_acquisto:75},
+  {modello:"iPhone X 256GB", prezzo_acquisto:85},
+  {modello:"iPhone XR 64GB", prezzo_acquisto:95},
+  {modello:"iPhone XR 128GB", prezzo_acquisto:105},
+  {modello:"iPhone XR 256GB", prezzo_acquisto:115},
+  {modello:"iPhone XS 64GB", prezzo_acquisto:110},
+  {modello:"iPhone XS 256GB", prezzo_acquisto:120},
+  {modello:"iPhone SE (2nd Generation) 64GB", prezzo_acquisto:75},
+  {modello:"iPhone SE (2nd Generation) 128GB", prezzo_acquisto:85},
+  {modello:"iPhone SE (2nd Generation) 256GB", prezzo_acquisto:95},
+  {modello:"iPhone SE (3rd Generation) 64GB", prezzo_acquisto:105},
+  {modello:"iPhone SE (3rd Generation) 128GB", prezzo_acquisto:115},
+  {modello:"iPhone SE (3rd Generation) 256GB", prezzo_acquisto:130},
+  {modello:"iPhone 11 64GB", prezzo_acquisto:115},
+  {modello:"iPhone 11 128GB", prezzo_acquisto:135},
+  {modello:"iPhone 11 256GB", prezzo_acquisto:150},
+  {modello:"iPhone 11 Pro 64GB", prezzo_acquisto:140},
+  {modello:"iPhone 11 Pro 256GB", prezzo_acquisto:160},
+  {modello:"iPhone 11 Pro 512GB", prezzo_acquisto:180},
+  {modello:"iPhone 11 Pro Max 64GB", prezzo_acquisto:155},
+  {modello:"iPhone 11 Pro Max 256GB", prezzo_acquisto:175},
+  {modello:"iPhone 11 Pro Max 512GB", prezzo_acquisto:195},
+  {modello:"iPhone 12 64GB", prezzo_acquisto:135},
+  {modello:"iPhone 12 128GB", prezzo_acquisto:155},
+  {modello:"iPhone 12 256GB", prezzo_acquisto:175},
+  {modello:"iPhone 12 Pro Max 128GB", prezzo_acquisto:245},
+  {modello:"iPhone 12 Pro Max 256GB", prezzo_acquisto:275},
+  {modello:"iPhone 12 Pro Max 512GB", prezzo_acquisto:305},
+  {modello:"iPhone 13 Mini 128GB", prezzo_acquisto:175},
+  {modello:"iPhone 13 Mini 256GB", prezzo_acquisto:195},
+  {modello:"iPhone 13 Mini 512GB", prezzo_acquisto:215},
+  {modello:"iPhone 13 Pro 128GB", prezzo_acquisto:265},
+  {modello:"iPhone 13 Pro 256GB", prezzo_acquisto:285},
+  {modello:"iPhone 13 Pro 512GB", prezzo_acquisto:305},
+  {modello:"iPhone 13 Pro 1TB", prezzo_acquisto:325},
+  {modello:"iPhone 13 Pro Max 128GB", prezzo_acquisto:320},
+  {modello:"iPhone 13 Pro Max 256GB", prezzo_acquisto:365},
+  {modello:"iPhone 13 Pro Max 512GB", prezzo_acquisto:395},
+  {modello:"iPhone 13 Pro Max 1TB", prezzo_acquisto:425},
+  {modello:"iPhone 14 128GB", prezzo_acquisto:260},
+  {modello:"iPhone 14 256GB", prezzo_acquisto:290},
+  {modello:"iPhone 14 512GB", prezzo_acquisto:320},
+  {modello:"iPhone 14 Plus 128GB", prezzo_acquisto:280},
+  {modello:"iPhone 14 Plus 256GB", prezzo_acquisto:300},
+  {modello:"iPhone 14 Plus 512GB", prezzo_acquisto:320},
+  {modello:"iPhone 14 Pro 128GB", prezzo_acquisto:365},
+  {modello:"iPhone 14 Pro 256GB", prezzo_acquisto:385},
+  {modello:"iPhone 14 Pro 512GB", prezzo_acquisto:405},
+  {modello:"iPhone 14 Pro 1TB", prezzo_acquisto:430},
+  {modello:"iPhone 14 Pro Max 128GB", prezzo_acquisto:400},
+  {modello:"iPhone 14 Pro Max 256GB", prezzo_acquisto:430},
+  {modello:"iPhone 14 Pro Max 512GB", prezzo_acquisto:460},
+  {modello:"iPhone 14 Pro Max 1TB", prezzo_acquisto:490},
+  {modello:"iPhone 15 128GB", prezzo_acquisto:390},
+  {modello:"iPhone 15 256GB", prezzo_acquisto:420},
+  {modello:"iPhone 15 512GB", prezzo_acquisto:450},
+  {modello:"iPhone 15 Plus 128GB", prezzo_acquisto:390},
+  {modello:"iPhone 15 Plus 256GB", prezzo_acquisto:420},
+  {modello:"iPhone 15 Plus 512GB", prezzo_acquisto:450},
+  {modello:"iPhone 15 Pro 128GB", prezzo_acquisto:455},
+  {modello:"iPhone 15 Pro 256GB", prezzo_acquisto:485},
+  {modello:"iPhone 15 Pro 512GB", prezzo_acquisto:515},
+  {modello:"iPhone 15 Pro 1TB", prezzo_acquisto:545},
+  {modello:"iPhone 15 Pro Max 256GB", prezzo_acquisto:510},
+  {modello:"iPhone 15 Pro Max 512GB", prezzo_acquisto:540},
+  {modello:"iPhone 15 Pro Max 1TB", prezzo_acquisto:570},
+  {modello:"iPhone 16 128GB", prezzo_acquisto:495},
+  {modello:"iPhone 16 256GB", prezzo_acquisto:535},
+  {modello:"iPhone 16 512GB", prezzo_acquisto:565},
+  {modello:"iPhone 16 Plus 128GB", prezzo_acquisto:515},
+  {modello:"iPhone 16 Plus 256GB", prezzo_acquisto:565},
+  {modello:"iPhone 16 Plus 512GB", prezzo_acquisto:585},
+  {modello:"iPhone 16 Pro 128GB", prezzo_acquisto:635},
+  {modello:"iPhone 16 Pro 256GB", prezzo_acquisto:675},
+  {modello:"iPhone 16 Pro 512GB", prezzo_acquisto:695},
+  {modello:"iPhone 16 Pro 1TB", prezzo_acquisto:715},
+  {modello:"iPhone 16 Pro Max 256GB", prezzo_acquisto:705},
+  {modello:"iPhone 16 Pro Max 512GB", prezzo_acquisto:755},
+  {modello:"iPhone 16 Pro Max 1TB", prezzo_acquisto:785},
+];
+
+// Map supplier models to CATALOG ASINs
+function findASINsForModel(modello) {
+  // Map supplier name to catalog serie/modello/storage
+  const m = modello.toLowerCase();
+  const result = { asin_it:'', asin_de:'', asin_fr:'', asin_es:'' };
+  
+  for (const row of CATALOG) {
+    const catalogName = `${row[1]} ${row[2]}`.toLowerCase();
+    if (catalogName === m || 
+        catalogName.replace('iphone ','iphone ') === m) {
+      // Use first ASIN found per market (any color)
+      if (!result.asin_it && row[4]) result.asin_it = row[4];
+      if (!result.asin_de && row[5]) result.asin_de = row[5];
+      if (!result.asin_fr && row[6]) result.asin_fr = row[6];
+      if (!result.asin_es && row[7]) result.asin_es = row[7];
+    }
+  }
+  return result;
+}
+
+let reportData = [];
+
+function filterReport() {
+  const q = document.getElementById('report-search').value.toLowerCase();
+  renderReportTable(reportData.filter(r => !q || r.modello.toLowerCase().includes(q)));
+}
+
+function renderReportTable(data) {
+  const wrap = document.getElementById('report-table-wrap');
+  if (!data.length) { wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#8890aa;">Nessun dato — clicca "Avvia scansione prezzi"</div>'; return; }
+
+  const rows = data.map(r => {
+    const mktCells = ['IT','DE','FR','ES'].map(mkt => {
+      const d = r.markets?.[mkt];
+      if (!d) return `<td style="padding:7px 10px;text-align:center;font-size:11px;color:#2e3350;">—</td><td style="padding:7px 10px;text-align:center;font-size:11px;color:#2e3350;">—</td>`;
+      if (d.error) return `<td colspan="2" style="padding:7px 10px;text-align:center;font-size:10px;color:#f56565;">${d.error}</td>`;
+      const exStr = d.excellent ? `€${d.excellent.toFixed(0)}` : '—';
+      const netColor = d.net > 0 ? '#48bb78' : d.net < 0 ? '#f56565' : '#8890aa';
+      const netStr = d.net !== null ? `€${d.net.toFixed(0)}` : '—';
+      return `<td style="padding:7px 10px;text-align:center;font-size:11px;color:#e8eaf0;">${exStr}</td><td style="padding:7px 10px;text-align:center;font-size:11px;font-weight:700;color:${netColor};">${netStr}</td>`;
+    }).join('');
+
+    return `<tr style="border-bottom:1px solid rgba(46,51,80,0.5);">
+      <td style="padding:7px 10px;font-size:11px;font-weight:600;color:#e8eaf0;">${r.modello}</td>
+      <td style="padding:7px 10px;text-align:center;font-size:11px;color:#4f8ef7;">€${r.prezzo_acquisto}</td>
+      ${mktCells}
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `<div style="background:#1a1d27;border:1px solid #2e3350;border-radius:10px;overflow:hidden;">
+    <div style="overflow-x:auto;max-height:65vh;overflow-y:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead style="position:sticky;top:0;background:#1a1d27;">
+          <tr style="border-bottom:2px solid #2e3350;">
+            <th style="padding:8px 10px;text-align:left;font-size:9px;color:#8890aa;text-transform:uppercase;">Modello</th>
+            <th style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">Acquisto</th>
+            <th colspan="2" style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">🇮🇹 IT</th>
+            <th colspan="2" style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">🇩🇪 DE</th>
+            <th colspan="2" style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">🇫🇷 FR</th>
+            <th colspan="2" style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">🇪🇸 ES</th>
+          </tr>
+          <tr style="border-bottom:1px solid #2e3350;">
+            <th></th><th></th>
+            ${['IT','DE','FR','ES'].map(()=>'<th style="padding:4px 10px;text-align:center;font-size:8px;color:#64748b;">Eccellente</th><th style="padding:4px 10px;text-align:center;font-size:8px;color:#64748b;">Margine</th>').join('')}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+async function runReport() {
+  const btn = document.getElementById('report-btn');
+  const status = document.getElementById('report-status');
+  btn.disabled = true;
+  btn.textContent = '⟳ Scansione in corso...';
+
+  // Build items with ASINs
+  const items = SUPPLIER_NL.map(s => ({
+    ...s,
+    ...findASINsForModel(s.modello)
+  }));
+
+  // Show initial table
+  reportData = items.map(i => ({ modello: i.modello, prezzo_acquisto: i.prezzo_acquisto, markets: {} }));
+  renderReportTable(reportData);
+
+  const total = items.length;
+  let done = 0;
+
+  // Process in batches of 5
+  const batchSize = 5;
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    try {
+      const r = await fetch('/api/bulk-price', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ items: batch })
+      });
+      const results = await r.json();
+      
+      for (const res of results) {
+        const idx = reportData.findIndex(x => x.modello === res.modello);
+        if (idx >= 0) reportData[idx] = res;
+        done++;
+      }
+      
+      status.textContent = `Elaborati ${done}/${total} modelli...`;
+      renderReportTable(reportData);
+    } catch(e) {
+      status.textContent = `Errore batch: ${e.message}`;
+    }
+    
+    if (i + batchSize < items.length) await new Promise(r => setTimeout(r, 1000));
+  }
+
+  status.textContent = `✓ Completato — ${total} modelli analizzati`;
+  btn.disabled = false;
+  btn.textContent = '▶ Avvia scansione prezzi';
+}
 </script>
 </body>
 </html>
