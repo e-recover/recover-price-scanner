@@ -29,7 +29,7 @@ app.get("/api/ninja", async (req, res) => {
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
   const key = "06373c312emshcdbda3da9d2a3b1p16500cjsna8804749f0c5";
   try {
-    const url = `https://real-time-amazon-data.p.rapidapi.com/product-offers?asin=${asin}&country=${domain.toUpperCase()}&limit=20`;
+    const url = `https://real-time-amazon-data.p.rapidapi.com/product-offers?asin=${asin}&country=${domain.toUpperCase()}&limit=20&no_cache=true`;
     const response = await fetch(url, {
       headers: {
         "x-rapidapi-key": key,
