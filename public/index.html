@@ -146,6 +146,10 @@
         <input id="asin-input" class="mono" type="text" placeholder="es. B09MJSL8MR" maxlength="10" autocomplete="off" spellcheck="false" oninput="this.value=this.value.toUpperCase()" />
         <div class="asin-status" id="asin-status"></div>
       </label>
+      <label class="field" style="min-width:130px">
+        <span>Prezzo acquisto (€)</span>
+        <input id="buy-price" type="number" min="0" placeholder="es. 300" style="font-family:inherit;" />
+      </label>
       <button class="btn" id="search-btn" onclick="doSearch()">
         <span id="btn-label">Cerca su tutti i mercati</span>
         <div class="spinner" id="spinner"></div>
@@ -648,6 +652,15 @@ function clearASIN() {
   document.getElementById("asin-status").textContent="";
 }
 
+function calcMarginCell(buyPrice, sellPrice) {
+  if (!buyPrice || !sellPrice || sellPrice <= 0) return '<span class="na">—</span>';
+  const commission = sellPrice * 0.073 + 15;
+  const ivaMargin = (sellPrice - buyPrice) * 22 / 122;
+  const net = sellPrice - buyPrice - commission - ivaMargin;
+  const color = net >= 0 ? 'var(--success)' : 'var(--danger)';
+  return `<span style="font-weight:700;color:${color}">€${net.toFixed(0)}</span>`;
+}
+
 function formatPrice(cents) {
   if (!cents || cents===-1) return null;
   return "€"+(cents/100).toFixed(2);
@@ -704,6 +717,7 @@ async function doSearch() {
       <td><span class="scanning-cell">...</span></td>
       <td><span class="scanning-cell">...</span></td>
       <td><span class="scanning-cell">...</span></td>
+      <td><span class="scanning-cell">...</span></td>
       <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>
     </tr>`;
   }).join("");
@@ -716,7 +730,7 @@ async function doSearch() {
     <div class="markets-table-wrap">
       <table class="markets-table">
         <thead><tr>
-          <th>Mercato</th><th>Prezzo Migliore</th><th>Ricondizionato</th><th>Usato</th><th>Eccellente</th><th>Link</th>
+          <th>Mercato</th><th>Prezzo Migliore</th><th>Ricondizionato</th><th>Usato</th><th>Eccellente</th><th>Guadagno netto</th><th>Link</th>
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>
@@ -761,18 +775,24 @@ async function doSearch() {
       const newP=latestPrice(csv[1]);
       if (best) prices.push(best);
 
+      // Margin calculation
+      const buyPrice = parseFloat(document.getElementById("buy-price").value)||0;
+      const sellPrice = newP ? newP/100 : (best ? best/100 : 0);
+      const marginCell = calcMarginCell(buyPrice, sellPrice);
+
       rowEl.innerHTML=`
         <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
         <td><span class="price-val">${formatPrice(best)||'<span class="na">N/D</span>'}</span></td>
         <td><span class="price-val">${formatPrice(refurb)||'<span class="na">—</span>'}</span></td>
         <td><span class="price-val">${formatPrice(used)||'<span class="na">—</span>'}</span></td>
         <td><span class="price-val">${formatPrice(newP)||'<span class="na">—</span>'}</span></td>
+        <td>${marginCell}</td>
         <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
 
     } catch(e) {
       rowEl.innerHTML=`
         <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
-        <td colspan="4"><span class="price-val na">${e.message||"Errore"}</span></td>
+        <td colspan="5"><span class="price-val na">${e.message||"Errore"}</span></td>
         <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
     }
 
