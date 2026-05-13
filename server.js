@@ -1,21 +1,18 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const path = require("path");
-
+ 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const KEEPA_KEY = process.env.KEEPA_API_KEY;
 const BM_KEY = process.env.BM_API_KEY;
-const SDOG_KEY = process.env.SCRAPINGDOG_API_KEY;
-
+ 
 app.use(express.static(path.join(__dirname, "public")));
-
-// ─── KEEPA ────────────────────────────────────────────────────────────────────
+ 
 app.get("/api/keepa", async (req, res) => {
   const { asin, domain } = req.query;
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
   if (!KEEPA_KEY) return res.status(500).json({ error: "Keepa API key not configured" });
-
   try {
     const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1`;
     const response = await fetch(url);
@@ -26,25 +23,7 @@ app.get("/api/keepa", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ─── SCRAPINGDOG — Real-time Amazon offers by condition ───────────────────────
-app.get("/api/offers", async (req, res) => {
-  const { asin, domain } = req.query;
-  if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
-  
-  const key = SDOG_KEY || "6a04a93f224eb08d8cc3107c";
-
-  try {
-    const url = `https://api.scrapingdog.com/amazon/offers?api_key=${key}&asin=${asin}&domain=${domain}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── OPENWEB NINJA — Real-time Amazon offers by condition ────────────────────
+ 
 app.get("/api/ninja", async (req, res) => {
   const { asin, domain } = req.query;
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
@@ -63,11 +42,9 @@ app.get("/api/ninja", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ─── BACK MARKET ─────────────────────────────────────────────────────────────
+ 
 app.get("/api/backmarket/listings", async (req, res) => {
   if (!BM_KEY) return res.status(500).json({ error: "Back Market API key not configured" });
-
   try {
     const response = await fetch("https://www.backmarket.fr/ws/listings?page=1", {
       headers: {
@@ -82,10 +59,9 @@ app.get("/api/backmarket/listings", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 app.get("/api/backmarket/all", async (req, res) => {
   if (!BM_KEY) return res.status(500).json({ error: "Back Market API key not configured" });
-
   const countries = [
     { code:"it", host:"https://www.backmarket.it", lang:"it-it" },
     { code:"fr", host:"https://www.backmarket.fr", lang:"fr-fr" },
@@ -93,7 +69,6 @@ app.get("/api/backmarket/all", async (req, res) => {
     { code:"es", host:"https://www.backmarket.es", lang:"es-es" },
     { code:"nl", host:"https://www.backmarket.nl", lang:"nl-nl" },
   ];
-
   const results = {};
   for (const c of countries) {
     try {
@@ -119,97 +94,7 @@ app.get("/api/backmarket/all", async (req, res) => {
   }
   res.json(results);
 });
-
-app.listen(PORT, () => {
-  console.log(`Recover Price Scanner running on port ${PORT}`);
-});
-
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-const KEEPA_KEY = process.env.KEEPA_API_KEY;
-const BM_KEY = process.env.BM_API_KEY;
-
-app.use(express.static(path.join(__dirname, "public")));
-
-// ─── KEEPA ────────────────────────────────────────────────────────────────────
-app.get("/api/keepa", async (req, res) => {
-  const { asin, domain } = req.query;
-  if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
-  if (!KEEPA_KEY) return res.status(500).json({ error: "Keepa API key not configured" });
-
-  try {
-    const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1`;
-    const response = await fetch(url);
-    const data = await response.json();
-    if (!response.ok) throw new Error(`Keepa API error: ${response.status}`);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── BACK MARKET ─────────────────────────────────────────────────────────────
-// Test endpoint - fetch listings to understand data structure
-app.get("/api/backmarket/listings", async (req, res) => {
-  if (!BM_KEY) return res.status(500).json({ error: "Back Market API key not configured" });
-
-  try {
-    const response = await fetch("https://www.backmarket.fr/ws/listings?page=1", {
-      headers: {
-        "Authorization": `Basic ${BM_KEY}`,
-        "Accept": "application/json",
-        "Accept-Language": "fr-fr",
-      }
-    });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get listings for all countries
-app.get("/api/backmarket/all", async (req, res) => {
-  if (!BM_KEY) return res.status(500).json({ error: "Back Market API key not configured" });
-
-  const countries = [
-    { code:"it", host:"https://www.backmarket.it", lang:"it-it" },
-    { code:"fr", host:"https://www.backmarket.fr", lang:"fr-fr" },
-    { code:"de", host:"https://www.backmarket.de", lang:"de-de" },
-    { code:"es", host:"https://www.backmarket.es", lang:"es-es" },
-    { code:"nl", host:"https://www.backmarket.nl", lang:"nl-nl" },
-  ];
-
-  const results = {};
-
-  for (const c of countries) {
-    try {
-      let allListings = [];
-      let url = `${c.host}/ws/listings?page=1`;
-      
-      while (url) {
-        const r = await fetch(url, {
-          headers: {
-            "Authorization": `Basic ${BM_KEY}`,
-            "Accept": "application/json",
-            "Accept-Language": c.lang,
-          }
-        });
-        const data = await r.json();
-        if (!r.ok) break;
-        allListings = allListings.concat(data.results || []);
-        url = data.next || null;
-      }
-      results[c.code] = allListings;
-    } catch(e) {
-      results[c.code] = [];
-    }
-  }
-
-  res.json(results);
-});
-
+ 
 app.listen(PORT, () => {
   console.log(`Recover Price Scanner running on port ${PORT}`);
 });
