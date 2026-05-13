@@ -101,7 +101,7 @@ app.get("/api/serpapi", async (req, res) => {
   const key = "6863c962f37b3c868d7e178b94e8ea0ab1e87bf9f70854c875ae458eea6584f1";
   try {
     const amazon_domain = `amazon.${domain.toLowerCase()}`;
-    const url = `https://serpapi.com/search?engine=amazon_product_prices&asin=${asin}&amazon_domain=${amazon_domain}&api_key=${key}`;
+    const url = `https://serpapi.com/search?engine=amazon_product&asin=${asin}&amazon_domain=${amazon_domain}&api_key=${key}`;
     const response = await fetch(url);
     const data = await response.json();
     res.json(data);
