@@ -734,16 +734,16 @@ function getBuyBoxPrice(data) {
   return parseNinjaPrice(data.product_price);
 }
 
-// Domain mapping for Ninja (country codes)
-const NINJA_COUNTRY = {IT:"IT", DE:"DE", FR:"FR", ES:"ES"};
+// Domain mapping for SerpApi
+const SERP_DOMAIN = {IT:"amazon.it", DE:"amazon.de", FR:"amazon.fr", ES:"amazon.es"};
 
 async function fetchMarket(asin, mkt) {
-  const country = NINJA_COUNTRY[mkt.id] || mkt.id;
-  const r = await fetch(`/api/ninja?asin=${encodeURIComponent(asin)}&domain=${country}`);
+  const amazon_domain = SERP_DOMAIN[mkt.id] || `amazon.${mkt.id.toLowerCase()}`;
+  const r = await fetch(`/api/serpapi?asin=${encodeURIComponent(asin)}&domain=${mkt.id.toLowerCase()}`);
   const d = await r.json();
-  if (!r.ok) throw new Error(d.message||`HTTP ${r.status}`);
-  if (d.status !== "OK") throw new Error(d.message||"Errore API");
-  return d.data;
+  if (!r.ok) throw new Error(d.error||`HTTP ${r.status}`);
+  if (d.error) throw new Error(d.error);
+  return d;
 }
 
 async function doSearch() {
@@ -799,17 +799,24 @@ async function doSearch() {
 
     try {
       const data = await fetchMarket(mktAsin, mkt);
+      const po = data.purchase_options || {};
+      const pr = data.product_results || {};
 
-      if (!title && data.product_title) {
-        title = data.product_title;
+      if (!title && pr.title) {
+        title = pr.title;
         document.getElementById("product-title").textContent = title;
-        if (data.product_photo) {
-          document.querySelector(".product-placeholder").outerHTML=`<img class="product-image" src="${data.product_photo}" alt="" onerror="this.style.display='none'" />`;
+        if (pr.thumbnail) {
+          document.querySelector(".product-placeholder").outerHTML=`<img class="product-image" src="${pr.thumbnail}" alt="" onerror="this.style.display='none'" />`;
         }
       }
 
-      const buyBox = getBuyBoxPrice(data);
-      const excellent = getLowestByCondition(data.product_offers, 'excellent');
+      // SerpApi purchase_options
+      const excellentPrice = po.refurbished_excellent?.extracted_price || null;
+      const excellentDelivery = po.refurbished_excellent?.delivery?.[0] || '';
+      const excellentShip = excellentDelivery.includes('FREE') ? 0 : (parseNinjaPrice(excellentDelivery) || 0);
+      const excellent = excellentPrice ? excellentPrice + excellentShip : null;
+
+      const buyBox = pr.extracted_price || excellentPrice || null;
 
       const buyPrice = parseFloat(document.getElementById("buy-price").value)||0;
       const sellPrice = excellent || buyBox || 0;
