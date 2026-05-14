@@ -1,20 +1,20 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const path = require("path");
-
+ 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
+ 
 // --- ENV ---
 const KEEPA_KEY = process.env.KEEPA_API_KEY;
 const SERPAPI_KEY = process.env.SERPAPI_KEY || process.env.SERPAPI_API_KEY;
-const BM_KEY = process.env.BM_KEY;
+const BM_KEY = process.env.BM_API_KEY || process.env.BM_KEY;
 const NINJA_KEY = process.env.NINJA_KEY || process.env.RAPIDAPI_KEY;
-
+ 
 // --- Middleware ---
 app.use(express.json({ limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "public")));
-
+ 
 // --- Mapping Keepa domain (numerico) -> SerpApi amazon_domain (TLD) ---
 const SERPAPI_DOMAIN_MAP = {
   "8": "amazon.it",
@@ -24,7 +24,7 @@ const SERPAPI_DOMAIN_MAP = {
   "1": "amazon.com",
   "2": "amazon.co.uk"
 };
-
+ 
 // --- Mapping Keepa domain -> Back Market market (TLD + locale) ---
 const BM_MARKETS = {
   IT: { host: "www.backmarket.it", locale: "it-it" },
@@ -33,7 +33,7 @@ const BM_MARKETS = {
   ES: { host: "www.backmarket.es", locale: "es-es" },
   NL: { host: "www.backmarket.nl", locale: "nl-nl" }
 };
-
+ 
 // =====================================================
 // KEEPA - standard product call
 // =====================================================
@@ -41,7 +41,7 @@ app.get("/api/keepa", async (req, res) => {
   const { asin, domain } = req.query;
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
   if (!KEEPA_KEY) return res.status(500).json({ error: "Keepa API key not configured" });
-
+ 
   try {
     const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1`;
     const r = await fetch(url);
@@ -52,7 +52,7 @@ app.get("/api/keepa", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // =====================================================
 // KEEPA OFFERS - includes live offers + monthlySold
 // =====================================================
@@ -60,7 +60,7 @@ app.get("/api/keepa-offers", async (req, res) => {
   const { asin, domain } = req.query;
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
   if (!KEEPA_KEY) return res.status(500).json({ error: "Keepa API key not configured" });
-
+ 
   try {
     const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1&offers=20`;
     const r = await fetch(url);
@@ -71,19 +71,19 @@ app.get("/api/keepa-offers", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // =====================================================
 // SERPAPI - with proper domain mapping (FIXED)
 // =====================================================
 app.get("/api/serpapi", async (req, res) => {
   const { asin, domain } = req.query;
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
-
+ 
   const amazon_domain = SERPAPI_DOMAIN_MAP[String(domain)];
   if (!amazon_domain) return res.status(400).json({ error: `Unsupported domain code: ${domain}` });
-
+ 
   if (!SERPAPI_KEY) return res.status(500).json({ error: "SerpApi key not configured" });
-
+ 
   try {
     const url = `https://serpapi.com/search.json?engine=amazon_product&amazon_domain=${amazon_domain}&asin=${asin}&api_key=${SERPAPI_KEY}`;
     const r = await fetch(url);
@@ -94,7 +94,7 @@ app.get("/api/serpapi", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // =====================================================
 // NINJA / RapidAPI Real-Time Amazon Data
 // =====================================================
@@ -102,9 +102,9 @@ app.get("/api/ninja", async (req, res) => {
   const { asin, domain } = req.query;
   if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
   if (!NINJA_KEY) return res.status(500).json({ error: "Ninja/RapidAPI key not configured" });
-
+ 
   const country = SERPAPI_DOMAIN_MAP[String(domain)]?.replace("amazon.", "").toUpperCase() || "IT";
-
+ 
   try {
     const url = `https://real-time-amazon-data.p.rapidapi.com/product-offers?asin=${asin}&country=${country}&limit=20`;
     const r = await fetch(url, {
@@ -120,7 +120,7 @@ app.get("/api/ninja", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // =====================================================
 // BACK MARKET - listings for a single market (default FR)
 // =====================================================
@@ -129,7 +129,7 @@ app.get("/api/backmarket/listings", async (req, res) => {
   const market = (req.query.market || "FR").toUpperCase();
   const m = BM_MARKETS[market];
   if (!m) return res.status(400).json({ error: `Unsupported market: ${market}` });
-
+ 
   try {
     const url = `https://${m.host}/ws/listings`;
     const r = await fetch(url, {
@@ -146,16 +146,16 @@ app.get("/api/backmarket/listings", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // =====================================================
 // BACK MARKET - all 5 markets in parallel
 // =====================================================
 app.get("/api/backmarket/all", async (req, res) => {
   if (!BM_KEY) return res.status(500).json({ error: "BM key not configured" });
-
+ 
   const markets = Object.keys(BM_MARKETS);
   const results = {};
-
+ 
   await Promise.all(markets.map(async (market) => {
     const m = BM_MARKETS[market];
     try {
@@ -178,10 +178,10 @@ app.get("/api/backmarket/all", async (req, res) => {
       results[market] = { ok: false, error: err.message };
     }
   }));
-
+ 
   res.json(results);
 });
-
+ 
 // =====================================================
 // BULK PRICE - report massivo
 // Body: { items: [{ asin, domain, color, model, storage }], source: "keepa-offers" }
@@ -192,7 +192,7 @@ app.post("/api/bulk-price", async (req, res) => {
     return res.status(400).json({ error: "items array required" });
   }
   if (!KEEPA_KEY) return res.status(500).json({ error: "Keepa API key not configured" });
-
+ 
   const out = [];
   // process in small batches to be gentle with API
   const BATCH = 5;
@@ -223,7 +223,7 @@ app.post("/api/bulk-price", async (req, res) => {
   }
   res.json({ count: out.length, results: out });
 });
-
+ 
 // =====================================================
 // HEALTH CHECK
 // =====================================================
@@ -239,7 +239,7 @@ app.get("/api/health", (req, res) => {
     time: new Date().toISOString()
   });
 });
-
+ 
 app.listen(PORT, () => {
   console.log(`Recover Price Scanner running on port ${PORT}`);
 });
