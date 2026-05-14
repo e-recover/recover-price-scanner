@@ -10,6 +10,22 @@ const BM_KEY = process.env.BM_API_KEY;
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
+// ─── KEEPA WITH OFFERS ───────────────────────────────────────────────────────
+app.get("/api/keepa-offers", async (req, res) => {
+  const { asin, domain } = req.query;
+  if (!asin || !domain) return res.status(400).json({ error: "Missing asin or domain" });
+  if (!KEEPA_KEY) return res.status(500).json({ error: "Keepa API key not configured" });
+  try {
+    const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=1&offers=20&only-live-offers=1`;
+    const response = await fetch(url);
+    const data = await response.json();
+    if (!response.ok) throw new Error(`Keepa API error: ${response.status}`);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── KEEPA ────────────────────────────────────────────────────────────────────
 app.get("/api/keepa", async (req, res) => {
   const { asin, domain } = req.query;
