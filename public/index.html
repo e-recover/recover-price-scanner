@@ -967,70 +967,104 @@ const SUPPLIER_NL = [
   {modello:"iPhone 16 Pro Max 1TB", prezzo_acquisto:785},
 ];
 
-// Map supplier models to CATALOG ASINs
-function findASINsForModel(modello) {
-  // Map supplier name to catalog serie/modello/storage
+// Map supplier models to CATALOG ASINs — per colore
+function getCatalogRowsForModel(modello) {
   const m = modello.toLowerCase();
-  const result = { asin_it:'', asin_de:'', asin_fr:'', asin_es:'' };
-  
-  for (const row of CATALOG) {
+  return CATALOG.filter(row => {
     const catalogName = `${row[1]} ${row[2]}`.toLowerCase();
-    if (catalogName === m || 
-        catalogName.replace('iphone ','iphone ') === m) {
-      // Use first ASIN found per market (any color)
-      if (!result.asin_it && row[4]) result.asin_it = row[4];
-      if (!result.asin_de && row[5]) result.asin_de = row[5];
-      if (!result.asin_fr && row[6]) result.asin_fr = row[6];
-      if (!result.asin_es && row[7]) result.asin_es = row[7];
+    return catalogName === m;
+  });
+}
+
+// Build full item list with colors from CATALOG
+function buildSupplierItems() {
+  const items = [];
+  for (const s of SUPPLIER_NL) {
+    const rows = getCatalogRowsForModel(s.modello);
+    if (!rows.length) {
+      // No ASIN found — add placeholder
+      items.push({
+        modello: s.modello,
+        colore: '—',
+        prezzo_acquisto: s.prezzo_acquisto,
+        asin_it: '', asin_de: '', asin_fr: '', asin_es: '',
+        markets: {}
+      });
+    } else {
+      for (const row of rows) {
+        items.push({
+          modello: s.modello,
+          colore: row[3],
+          prezzo_acquisto: s.prezzo_acquisto,
+          asin_it: row[4]||'', asin_de: row[5]||'', asin_fr: row[6]||'', asin_es: row[7]||'',
+          markets: {}
+        });
+      }
     }
   }
-  return result;
+  return items;
 }
 
 let reportData = [];
+let allReportData = [];
 
 function filterReport() {
   const q = document.getElementById('report-search').value.toLowerCase();
-  renderReportTable(reportData.filter(r => !q || r.modello.toLowerCase().includes(q)));
+  renderReportTable(allReportData.filter(r => !q || r.modello.toLowerCase().includes(q) || (r.colore||'').toLowerCase().includes(q)));
 }
 
 function renderReportTable(data) {
   const wrap = document.getElementById('report-table-wrap');
-  if (!data.length) { wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#8890aa;">Nessun dato — clicca "Avvia scansione prezzi"</div>'; return; }
+  if (!data.length) { 
+    wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#8890aa;">Nessun dato — clicca "Avvia scansione prezzi"</div>'; 
+    return; 
+  }
 
+  // Group by modello for display
+  let lastModello = '';
   const rows = data.map(r => {
+    const isNewModello = r.modello !== lastModello;
+    lastModello = r.modello;
+    
     const mktCells = ['IT','DE','FR','ES'].map(mkt => {
       const d = r.markets?.[mkt];
-      if (!d) return `<td style="padding:7px 10px;text-align:center;font-size:11px;color:#2e3350;">—</td><td style="padding:7px 10px;text-align:center;font-size:11px;color:#2e3350;">—</td>`;
-      if (d.error) return `<td colspan="2" style="padding:7px 10px;text-align:center;font-size:10px;color:#f56565;">${d.error}</td>`;
+      const asinKey = `asin_${mkt.toLowerCase()}`;
+      if (!r[asinKey]) return `<td colspan="2" style="padding:5px 8px;text-align:center;font-size:10px;color:#2e3350;">—</td>`;
+      if (!d) return `<td style="padding:5px 8px;text-align:center;font-size:10px;color:#8890aa;">...</td><td style="padding:5px 8px;text-align:center;font-size:10px;color:#8890aa;">...</td>`;
+      if (d.error) return `<td colspan="2" style="padding:5px 8px;text-align:center;font-size:9px;color:#f56565;">${d.error}</td>`;
       const exStr = d.excellent ? `€${d.excellent.toFixed(0)}` : '—';
-      const netColor = d.net > 0 ? '#48bb78' : d.net < 0 ? '#f56565' : '#8890aa';
+      const netColor = d.net > 30 ? '#48bb78' : d.net > 0 ? '#f59e0b' : d.net !== null ? '#f56565' : '#8890aa';
       const netStr = d.net !== null ? `€${d.net.toFixed(0)}` : '—';
-      return `<td style="padding:7px 10px;text-align:center;font-size:11px;color:#e8eaf0;">${exStr}</td><td style="padding:7px 10px;text-align:center;font-size:11px;font-weight:700;color:${netColor};">${netStr}</td>`;
+      return `<td style="padding:5px 8px;text-align:center;font-size:10px;color:#e8eaf0;">${exStr}</td><td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;color:${netColor};">${netStr}</td>`;
     }).join('');
 
-    return `<tr style="border-bottom:1px solid rgba(46,51,80,0.5);">
-      <td style="padding:7px 10px;font-size:11px;font-weight:600;color:#e8eaf0;">${r.modello}</td>
-      <td style="padding:7px 10px;text-align:center;font-size:11px;color:#4f8ef7;">€${r.prezzo_acquisto}</td>
+    const modelloCell = isNewModello 
+      ? `<td rowspan="1" style="padding:5px 8px;font-size:11px;font-weight:700;color:#e8eaf0;border-right:1px solid #2e3350;">${r.modello}</td>`
+      : `<td style="padding:5px 8px;font-size:11px;color:#8890aa;border-right:1px solid #2e3350;"></td>`;
+
+    const rowBg = isNewModello ? 'rgba(79,142,247,0.04)' : 'transparent';
+
+    return `<tr style="border-bottom:1px solid rgba(46,51,80,0.3);background:${rowBg};">
+      ${modelloCell}
+      <td style="padding:5px 8px;font-size:10px;color:#8890aa;">${r.colore}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:10px;color:#4f8ef7;font-weight:700;">€${r.prezzo_acquisto}</td>
       ${mktCells}
     </tr>`;
   }).join('');
 
   wrap.innerHTML = `<div style="background:#1a1d27;border:1px solid #2e3350;border-radius:10px;overflow:hidden;">
     <div style="overflow-x:auto;max-height:65vh;overflow-y:auto;">
-      <table style="width:100%;border-collapse:collapse;font-size:11px;">
-        <thead style="position:sticky;top:0;background:#1a1d27;">
+      <table style="width:100%;border-collapse:collapse;font-size:10px;">
+        <thead style="position:sticky;top:0;background:#1a1d27;z-index:1;">
           <tr style="border-bottom:2px solid #2e3350;">
-            <th style="padding:8px 10px;text-align:left;font-size:9px;color:#8890aa;text-transform:uppercase;">Modello</th>
-            <th style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">Acquisto</th>
-            <th colspan="2" style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">🇮🇹 IT</th>
-            <th colspan="2" style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">🇩🇪 DE</th>
-            <th colspan="2" style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">🇫🇷 FR</th>
-            <th colspan="2" style="padding:8px 10px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">🇪🇸 ES</th>
+            <th style="padding:8px;text-align:left;font-size:9px;color:#8890aa;text-transform:uppercase;min-width:160px;">Modello</th>
+            <th style="padding:8px;text-align:left;font-size:9px;color:#8890aa;text-transform:uppercase;">Colore</th>
+            <th style="padding:8px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">Acquisto</th>
+            ${['🇮🇹 IT','🇩🇪 DE','🇫🇷 FR','🇪🇸 ES'].map(f=>`<th colspan="2" style="padding:8px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">${f}</th>`).join('')}
           </tr>
           <tr style="border-bottom:1px solid #2e3350;">
-            <th></th><th></th>
-            ${['IT','DE','FR','ES'].map(()=>'<th style="padding:4px 10px;text-align:center;font-size:8px;color:#64748b;">Eccellente</th><th style="padding:4px 10px;text-align:center;font-size:8px;color:#64748b;">Margine</th>').join('')}
+            <th></th><th></th><th></th>
+            ${['IT','DE','FR','ES'].map(()=>'<th style="padding:3px 8px;text-align:center;font-size:8px;color:#64748b;">Eccellente</th><th style="padding:3px 8px;text-align:center;font-size:8px;color:#64748b;">Margine</th>').join('')}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -1045,23 +1079,17 @@ async function runReport() {
   btn.disabled = true;
   btn.textContent = '⟳ Scansione in corso...';
 
-  // Build items with ASINs
-  const items = SUPPLIER_NL.map(s => ({
-    ...s,
-    ...findASINsForModel(s.modello)
-  }));
+  allReportData = buildSupplierItems();
+  renderReportTable(allReportData);
 
-  // Show initial table
-  reportData = items.map(i => ({ modello: i.modello, prezzo_acquisto: i.prezzo_acquisto, markets: {} }));
-  renderReportTable(reportData);
-
-  const total = items.length;
+  const total = allReportData.length;
   let done = 0;
+  status.textContent = `Preparati ${total} SKU (modello+colore)...`;
 
   // Process in batches of 5
   const batchSize = 5;
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
+  for (let i = 0; i < allReportData.length; i += batchSize) {
+    const batch = allReportData.slice(i, i + batchSize);
     try {
       const r = await fetch('/api/bulk-price', {
         method: 'POST',
@@ -1069,23 +1097,20 @@ async function runReport() {
         body: JSON.stringify({ items: batch })
       });
       const results = await r.json();
-      
-      for (const res of results) {
-        const idx = reportData.findIndex(x => x.modello === res.modello);
-        if (idx >= 0) reportData[idx] = res;
+      for (let j = 0; j < results.length; j++) {
+        allReportData[i + j].markets = results[j].markets || {};
         done++;
       }
-      
-      status.textContent = `Elaborati ${done}/${total} modelli...`;
-      renderReportTable(reportData);
+      status.textContent = `Elaborati ${done}/${total} SKU...`;
+      filterReport();
     } catch(e) {
-      status.textContent = `Errore batch: ${e.message}`;
+      status.textContent = `Errore: ${e.message}`;
+      break;
     }
-    
-    if (i + batchSize < items.length) await new Promise(r => setTimeout(r, 1000));
+    if (i + batchSize < allReportData.length) await new Promise(r => setTimeout(r, 800));
   }
 
-  status.textContent = `✓ Completato — ${total} modelli analizzati`;
+  status.textContent = `✓ Completato — ${done}/${total} SKU analizzati`;
   btn.disabled = false;
   btn.textContent = '▶ Avvia scansione prezzi';
 }
