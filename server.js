@@ -1,4 +1,3 @@
-// Mapping Keepa domain (numerico) → SerpApi amazon_domain (TLD)
 const SERPAPI_DOMAIN_MAP = {
   "8": "amazon.it",
   "3": "amazon.de",
