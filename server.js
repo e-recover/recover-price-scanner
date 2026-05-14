@@ -42,10 +42,11 @@ async function fetchSerpApi(asin, domain) {
   return r.json();
 }
  
+// FIX: usa engine=amazon_product + other_sellers=true (non engine=amazon_offers)
 async function fetchSerpApiOffers(asin, domain) {
   const amazon_domain = SERPAPI_DOMAIN_MAP[String(domain)];
   if (!amazon_domain) throw new Error(`Unsupported domain code: ${domain}`);
-  const url = `https://serpapi.com/search.json?engine=amazon_offers&amazon_domain=${amazon_domain}&asin=${asin}&api_key=${SERPAPI_KEY}`;
+  const url = `https://serpapi.com/search.json?engine=amazon_product&amazon_domain=${amazon_domain}&asin=${asin}&other_sellers=true&api_key=${SERPAPI_KEY}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error(`SerpApi offers error ${r.status}`);
   return r.json();
@@ -243,7 +244,7 @@ app.get("/api/health", (req, res) => {
       "GET /api/keepa?asin=&domain=",
       "GET /api/keepa-offers?asin=&domain=",
       "GET /api/serpapi?asin=&domain=",
-      "GET /api/serpapi-offers?asin=&domain=",
+      "GET /api/serpapi-offers?asin=&domain=  (con other_sellers=true)",
       "GET /api/scan-asin?asin=&domain=",
       "POST /api/bulk-scan",
       "GET /api/ninja?asin=&domain=",
