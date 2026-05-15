@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -69,6 +70,18 @@
     .mkt-checkbox-row label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; user-select: none; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
     .mkt-checkbox-row label input { width: auto; padding: 0; margin: 0; accent-color: var(--accent); }
     .token-info { padding: 0.75rem 1rem; border-top: 1px solid var(--border); font-size: 0.78rem; color: var(--muted); text-align: right; }
+    /* nuovi stili per Featured + MIN reale */
+    .price-block { display: flex; flex-direction: column; gap: 4px; }
+    .price-line { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+    .price-tag { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; padding: 1px 5px; border-radius: 3px; background: var(--surface2); }
+    .price-tag.featured { color: #4f8ef7; background: rgba(79,142,247,0.12); }
+    .price-tag.min { color: var(--warn); background: rgba(237,137,54,0.15); }
+    .feedback-badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; margin-left: 4px; }
+    .feedback-badge.good { background: rgba(72,187,120,0.15); color: var(--success); }
+    .feedback-badge.mid { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .feedback-badge.bad { background: rgba(245,101,101,0.15); color: var(--danger); }
+    .price-divider { height: 1px; background: var(--border); margin: 4px 0; }
+    .recover-line { font-size: 10px; color: var(--accent); margin-top: 4px; font-weight: 600; }
     @media (max-width: 700px) {
       .selector-grid { grid-template-columns: 1fr 1fr; }
       .product-header { flex-direction: column; }
@@ -660,6 +673,88 @@ function fmtMargin(net) {
   return `<span style="font-weight:700;color:${color}">€${net.toFixed(0)}</span>`;
 }
 
+// Badge feedback seller (basato su % positive)
+function feedbackBadge(pct) {
+  if (pct === null || pct === undefined) return '';
+  let cls = 'bad';
+  if (pct >= 90) cls = 'good';
+  else if (pct >= 70) cls = 'mid';
+  return `<span class="feedback-badge ${cls}">${pct}%</span>`;
+}
+
+// Render cella Eccellente: Featured (SerpApi) + MIN reale (Ninja) + posizione Recover
+function buildExcellentCell(data) {
+  const featured = data.excellent;
+  const minReal = data.excellentMinReal;
+  const recover = data.recoverPosition;
+
+  const hasFeatured = featured && featured.available && featured.price;
+  const hasMinReal = minReal && minReal.available && minReal.price;
+
+  // Se sono uguali (diff < 0.5€), mostra una riga sola "MIN" (perché è anche Featured)
+  const same = hasFeatured && hasMinReal && Math.abs(featured.price - minReal.price) < 0.5;
+
+  let html = '<div class="price-block">';
+
+  // Caso 1: featured presente E minReal uguale → mostra solo "MIN"
+  if (same) {
+    html += `<div class="price-line">
+      <span class="price-tag min">MIN</span>
+      <span class="price-val" data-val="${minReal.price}">€${minReal.price.toFixed(2)}</span>
+      ${feedbackBadge(minReal.positivePercent)}
+    </div>
+    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>`;
+  }
+  // Caso 2: entrambi presenti ma diversi
+  else if (hasFeatured && hasMinReal) {
+    html += `<div class="price-line">
+      <span class="price-tag featured">Featured</span>
+      <span class="price-val" style="font-size:0.92rem;">€${featured.price.toFixed(2)}</span>
+    </div>
+    <div class="seller-line">${featured.seller || '?'}</div>
+    <div class="price-divider"></div>
+    <div class="price-line">
+      <span class="price-tag min">MIN reale</span>
+      <span class="price-val" data-val="${minReal.price}" style="color:#f59e0b;">€${minReal.price.toFixed(2)}</span>
+      ${feedbackBadge(minReal.positivePercent)}
+    </div>
+    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>`;
+  }
+  // Caso 3: solo Featured (Ninja non trova nulla — improbabile)
+  else if (hasFeatured) {
+    html += `<div class="price-line">
+      <span class="price-tag featured">Featured</span>
+      <span class="price-val" data-val="${featured.price}">€${featured.price.toFixed(2)}</span>
+    </div>
+    <div class="seller-line">${featured.seller || '?'}</div>`;
+  }
+  // Caso 4: solo MIN reale (Featured assente, caso ES)
+  else if (hasMinReal) {
+    html += `<div class="price-line">
+      <span class="price-tag" style="color:#8890aa;">Featured assente</span>
+    </div>
+    <div class="price-line">
+      <span class="price-tag min">MIN reale</span>
+      <span class="price-val" data-val="${minReal.price}" style="color:#f59e0b;">€${minReal.price.toFixed(2)}</span>
+      ${feedbackBadge(minReal.positivePercent)}
+    </div>
+    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'} Eccellenti</div>`;
+  }
+  // Caso 5: niente
+  else {
+    html += `<span class="price-val na">—</span>
+    <div class="seller-line"><span class="opp-badge">Nessuna concorrenza Eccellente</span></div>`;
+  }
+
+  // Posizione Recover (se in lista)
+  if (recover && recover.inList) {
+    html += `<div class="recover-line">📌 Recover #${recover.rank} · €${recover.price.toFixed(2)} (${recover.condition})</div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
 // ─── AMAZON SCAN (singolo ASIN, tutti i mercati) ─────────────────────────────
 async function fetchScanASIN(asin, domain) {
   const r = await fetch(`/api/scan-asin?asin=${encodeURIComponent(asin)}&domain=${domain}`);
@@ -708,7 +803,7 @@ async function doSearch() {
         <tbody>${tableRows}</tbody>
       </table>
     </div>
-    <div class="token-info">Prezzi e seller dalla condizione Refurbished — Excellent. Margine calcolato con IVA a margine Art.36.</div>
+    <div class="token-info">Featured = Buy Box ufficiale Amazon. MIN reale = prezzo più basso tra tutte le offerte Eccellenti. Margine calcolato con IVA a margine Art.36.</div>
   </div>`;
   result.style.display="block";
 
@@ -741,18 +836,16 @@ async function doSearch() {
         ? `<span class="price-val">${monthly}</span><div class="seller-line">unità/mese</div>`
         : '<span class="price-val na">—</span>';
 
-      const ex = data.excellent;
-      let excellentCell;
-      if (ex && ex.available && ex.price) {
-        excellentVals.push({mkt, val: ex.price});
-        const sellerLine = ex.seller ? `<div class="seller-line">${ex.seller}</div>` : '';
-        excellentCell = `<span class="price-val" data-val="${ex.price}">€${ex.price.toFixed(2)}</span>${sellerLine}`;
-      } else {
-        excellentCell = `<span class="price-val na">—</span><div class="seller-line"><span class="opp-badge">Nessuna concorrenza</span></div>`;
-      }
+      const excellentCell = buildExcellentCell(data);
+
+      // Per il margine: usa MIN reale se c'è, altrimenti Featured
+      const minRealPrice = data.excellentMinReal && data.excellentMinReal.available ? data.excellentMinReal.price : null;
+      const featuredPrice = data.excellent && data.excellent.available ? data.excellent.price : null;
+      const sellPrice = minRealPrice || featuredPrice;
+
+      if (sellPrice) excellentVals.push({mkt, val: sellPrice});
 
       const buyPrice = parseFloat(document.getElementById("buy-price").value)||0;
-      const sellPrice = ex?.price || null;
       const marginCell = fmtMargin(calcMargin(buyPrice, sellPrice));
 
       rowEl.innerHTML=`
@@ -991,7 +1084,6 @@ async function runReport() {
   allReportData = buildSupplierItems();
   renderReportTable(allReportData);
 
-  // Costruisco la lista di items piatta: una richiesta per (riga × mercato attivo) dove l'ASIN esiste
   const flatItems = [];
   for (let rowIdx = 0; rowIdx < allReportData.length; rowIdx++) {
     const r = allReportData[rowIdx];
@@ -1045,7 +1137,6 @@ async function runReport() {
   btn.disabled = false; btn.textContent = '▶ Avvia scansione prezzi';
 }
 
-// Inizializza stima all'avvio
 window.addEventListener('DOMContentLoaded', updateEstimate);
 </script>
 </body>
