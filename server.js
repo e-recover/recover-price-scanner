@@ -240,6 +240,8 @@ app.get("/api/scan-asin", async (req, res) => {
   let excellentMinReal  = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
   let goodMinReal       = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
   let acceptableMinReal = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
+  // Featured da Ninja buy_boxes (variabile dedicata per evitare race con SerpApi)
+  let ninjaFeaturedExcellent = null;
   let recoverPosition   = { inList: false, rank: null, condition: null, price: null };
 
   const promises = [];
@@ -345,20 +347,18 @@ app.get("/api/scan-asin", async (req, res) => {
         goodMinReal       = buildMin("good");
         acceptableMinReal = buildMin("acceptable");
 
-        // FEATURED EXCELLENT da buy_boxes Ninja (più affidabile di SerpApi)
+        // FEATURED EXCELLENT da buy_boxes Ninja (popola variabile dedicata, no overwrite)
         const buyBoxes = Array.isArray(d.buy_boxes) ? d.buy_boxes : [];
         const bbExcellent = buyBoxes.find(b => classifyCondition(b.title) === "excellent");
         if (bbExcellent && bbExcellent.price) {
           const bbPrice = parsePrice(bbExcellent.price);
-          // Trovo il seller della prima offerta Excellent che ha quel prezzo
           let bbSeller = null;
           const match = enriched.filter(o => o.condition === "excellent" && Math.abs(o.price - bbPrice) < 0.5);
           if (match.length > 0) bbSeller = match[0].seller;
-          // Sovrascrivo solo se Ninja ha trovato qualcosa (priorità Ninja)
           if (bbPrice) {
-            excellent = {
+            ninjaFeaturedExcellent = {
               price: bbPrice,
-              seller: bbSeller || (excellent.seller || null),
+              seller: bbSeller,
               available: true,
             };
           }
@@ -378,6 +378,11 @@ app.get("/api/scan-asin", async (req, res) => {
   }
 
   await Promise.all(promises);
+
+  // MERGE: Ninja Buy Box ha priorità su SerpApi per Featured Excellent (più affidabile)
+  if (ninjaFeaturedExcellent && ninjaFeaturedExcellent.available) {
+    excellent = ninjaFeaturedExcellent;
+  }
 
   res.json({
     ok: true,
