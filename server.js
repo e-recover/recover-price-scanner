@@ -240,9 +240,8 @@ app.get("/api/scan-asin", async (req, res) => {
   let excellentMinReal  = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
   let goodMinReal       = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
   let acceptableMinReal = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
-  // Featured da Ninja buy_boxes (variabile dedicata per evitare race con SerpApi)
+  // Featured da Ninja product_offers[0 Excellent] (variabile dedicata per evitare race con SerpApi)
   let ninjaFeaturedExcellent = null;
-  let _ninjaBuyBoxesDebug = null; // DEBUG temporaneo
   let recoverPosition   = { inList: false, rank: null, condition: null, price: null };
 
   const promises = [];
@@ -348,27 +347,18 @@ app.get("/api/scan-asin", async (req, res) => {
         goodMinReal       = buildMin("good");
         acceptableMinReal = buildMin("acceptable");
 
-        // FEATURED EXCELLENT da buy_boxes Ninja (popola variabile dedicata, no overwrite)
-        const buyBoxes = Array.isArray(d.buy_boxes) ? d.buy_boxes : [];
-        // DEBUG temporaneo: esporre i titoli classificati
-        _ninjaBuyBoxesDebug = buyBoxes.map(b => ({
-          title: b.title,
-          price: b.price,
-          classified: classifyCondition(b.title),
-        }));
-        const bbExcellent = buyBoxes.find(b => classifyCondition(b.title) === "excellent");
-        if (bbExcellent && bbExcellent.price) {
-          const bbPrice = parsePrice(bbExcellent.price);
-          let bbSeller = null;
-          const match = enriched.filter(o => o.condition === "excellent" && Math.abs(o.price - bbPrice) < 0.5);
-          if (match.length > 0) bbSeller = match[0].seller;
-          if (bbPrice) {
-            ninjaFeaturedExcellent = {
-              price: bbPrice,
-              seller: bbSeller,
-              available: true,
-            };
-          }
+        // FEATURED EXCELLENT = prima offerta Eccellente nella lista product_offers di Ninja
+        // (su Amazon corrisponde all'"Offerta consigliata" / Buy Box Excellent)
+        const excellentByRank = enriched
+          .filter(o => o.condition === "excellent")
+          .sort((a, b) => a.rank - b.rank);
+        if (excellentByRank.length > 0) {
+          const first = excellentByRank[0];
+          ninjaFeaturedExcellent = {
+            price: first.price,
+            seller: first.seller,
+            available: true,
+          };
         }
 
         const myOffer = enriched.find(o => o.sellerId === RECOVER_SELLER_ID);
@@ -414,10 +404,6 @@ app.get("/api/scan-asin", async (req, res) => {
     keepaOk: keepaOk,
     serpapiOk: serpapiOk,
     ninjaOk: ninjaOk,
-    _debug: {
-      ninjaBuyBoxes: _ninjaBuyBoxesDebug,
-      ninjaFeaturedExcellent: ninjaFeaturedExcellent,
-    },
   });
 });
 
