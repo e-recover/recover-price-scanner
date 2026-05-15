@@ -705,14 +705,6 @@ function buildExcellentCell(data) {
   const recover = data.recoverPosition;
   const hasMinReal = minReal && minReal.available && minReal.totalPrice;
 
-  function deliveryLine(fee) {
-    if (fee === null || fee === undefined) return '';
-    if (fee === 0) {
-      return '<div style="font-size:10px;color:#48bb78;margin-top:2px;">📦 Spedizione gratuita</div>';
-    }
-    return `<div style="font-size:10px;color:#f59e0b;margin-top:2px;">📦 + €${fee.toFixed(2)} spedizione</div>`;
-  }
-
   let html = '<div class="price-block">';
 
   if (hasMinReal) {
@@ -721,8 +713,18 @@ function buildExcellentCell(data) {
       <span class="price-val" data-val="${minTotal}">€${minTotal.toFixed(2)}</span>
       ${feedbackBadge(minReal.positivePercent)}
     </div>
-    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>
-    ${deliveryLine(minReal.deliveryFee)}`;
+    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>`;
+
+    // Spedizione: se gratuita riga semplice verde, se a pagamento riquadro con dettaglio calcolo
+    if (minReal.deliveryFee === 0) {
+      html += '<div style="font-size:10px;color:#48bb78;margin-top:2px;">📦 Spedizione gratuita</div>';
+    } else if (minReal.deliveryFee > 0) {
+      html += `<div style="margin-top:6px;padding:5px 7px;background:rgba(245,158,11,0.08);border-left:2px solid #f59e0b;border-radius:3px;font-size:10px;line-height:1.4;">
+        <div style="color:#f59e0b;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;">📦 Prezzo con spedizione</div>
+        <div style="color:#e8eaf0;margin-top:2px;">€${minReal.price.toFixed(2)} + €${minReal.deliveryFee.toFixed(2)} sped. = <strong>€${minReal.totalPrice.toFixed(2)}</strong></div>
+        <div style="color:#8890aa;font-size:9px;">${minReal.seller || '?'} ${feedbackBadge(minReal.positivePercent)}</div>
+      </div>`;
+    }
   } else {
     html += `<span class="price-val na">—</span>
     <div class="seller-line"><span class="opp-badge">Nessuna offerta Eccellente</span></div>`;
@@ -854,9 +856,17 @@ async function doSearch() {
       }
 
       const monthly = data.monthlySold;
-      const monthlyStr = (monthly !== null && monthly !== undefined)
-        ? `<span class="price-val">${monthly}</span><div class="seller-line">unità/mese</div>`
-        : '<span class="price-val na">—</span>';
+      const bsr = data.salesRank;
+      let monthlyStr;
+      if (monthly !== null && monthly !== undefined) {
+        monthlyStr = `<span class="price-val">${monthly}</span><div class="seller-line">unità/mese</div>`;
+      } else if (bsr !== null && bsr !== undefined && bsr > 0) {
+        // Fallback BSR: mostra rank e classifica come proxy di popolarità
+        const bsrColor = bsr <= 10 ? '#48bb78' : bsr <= 50 ? '#f59e0b' : '#8890aa';
+        monthlyStr = `<span style="font-size:13px;font-weight:700;color:${bsrColor};">BSR #${bsr.toLocaleString('it-IT')}</span><div class="seller-line">in Renewed</div>`;
+      } else {
+        monthlyStr = '<span class="price-val na">—</span>';
+      }
 
       const buyBoxCell = buildBuyBoxCell(data);
       const excellentCell = buildExcellentCell(data);
