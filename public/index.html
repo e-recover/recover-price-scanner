@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -681,21 +682,27 @@ function feedbackBadge(pct) {
   return `<span class="feedback-badge ${cls}">${pct}%</span>`;
 }
 
-// Render cella Eccellente: Featured (SerpApi) + MIN reale (Ninja) con spedizione + MIN apparente
-function buildExcellentCell(data) {
+// Render cella Buy Box (Featured ufficiale Amazon, prezzo + seller)
+function buildBuyBoxCell(data) {
   const featured = data.excellent;
+  if (!featured || !featured.available || !featured.price) {
+    return `<div class="price-block">
+      <span class="price-val na" style="font-size:0.85rem;">— Assente</span>
+      <div class="seller-line" style="color:#8890aa;font-size:9px;">Nessuna Buy Box Eccellente</div>
+    </div>`;
+  }
+  return `<div class="price-block">
+    <span class="price-val">€${featured.price.toFixed(2)}</span>
+    <div class="seller-line">${featured.seller || '?'}</div>
+  </div>`;
+}
+
+// Render cella Eccellente: MIN reale + spedizione + apparente + Recover position
+function buildExcellentCell(data) {
   const minReal = data.excellentMinReal;
   const recover = data.recoverPosition;
-
-  const hasFeatured = featured && featured.available && featured.price;
   const hasMinReal = minReal && minReal.available && minReal.totalPrice;
 
-  const minTotal = hasMinReal ? minReal.totalPrice : null;
-  const same = hasFeatured && hasMinReal && Math.abs(featured.price - minTotal) < 0.5;
-
-  let html = '<div class="price-block">';
-
-  // Stato spedizione (sempre mostrato)
   function deliveryLine(fee) {
     if (fee === null || fee === undefined) return '';
     if (fee === 0) {
@@ -704,57 +711,19 @@ function buildExcellentCell(data) {
     return `<div style="font-size:10px;color:#f59e0b;margin-top:2px;">📦 + €${fee.toFixed(2)} spedizione</div>`;
   }
 
-  // Caso 1: Featured = MIN reale
-  if (same) {
+  let html = '<div class="price-block">';
+
+  if (hasMinReal) {
+    const minTotal = minReal.totalPrice;
     html += `<div class="price-line">
-      <span class="price-tag min">MIN</span>
       <span class="price-val" data-val="${minTotal}">€${minTotal.toFixed(2)}</span>
       ${feedbackBadge(minReal.positivePercent)}
     </div>
     <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>
     ${deliveryLine(minReal.deliveryFee)}`;
-  }
-  // Caso 2: Featured ≠ MIN reale
-  else if (hasFeatured && hasMinReal) {
-    html += `<div class="price-line">
-      <span class="price-tag featured">Featured</span>
-      <span class="price-val" style="font-size:0.92rem;">€${featured.price.toFixed(2)}</span>
-    </div>
-    <div class="seller-line">${featured.seller || '?'}</div>
-    <div class="price-divider"></div>
-    <div class="price-line">
-      <span class="price-tag min">MIN reale</span>
-      <span class="price-val" data-val="${minTotal}" style="color:#f59e0b;">€${minTotal.toFixed(2)}</span>
-      ${feedbackBadge(minReal.positivePercent)}
-    </div>
-    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>
-    ${deliveryLine(minReal.deliveryFee)}`;
-  }
-  // Caso 3: solo Featured
-  else if (hasFeatured) {
-    html += `<div class="price-line">
-      <span class="price-tag featured">Featured</span>
-      <span class="price-val" data-val="${featured.price}">€${featured.price.toFixed(2)}</span>
-    </div>
-    <div class="seller-line">${featured.seller || '?'}</div>`;
-  }
-  // Caso 4: solo MIN reale (Featured assente)
-  else if (hasMinReal) {
-    html += `<div class="price-line">
-      <span class="price-tag" style="color:#8890aa;">Featured assente</span>
-    </div>
-    <div class="price-line">
-      <span class="price-tag min">MIN reale</span>
-      <span class="price-val" data-val="${minTotal}" style="color:#f59e0b;">€${minTotal.toFixed(2)}</span>
-      ${feedbackBadge(minReal.positivePercent)}
-    </div>
-    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'} Eccellenti</div>
-    ${deliveryLine(minReal.deliveryFee)}`;
-  }
-  // Caso 5: niente
-  else {
+  } else {
     html += `<span class="price-val na">—</span>
-    <div class="seller-line"><span class="opp-badge">Nessuna concorrenza Eccellente</span></div>`;
+    <div class="seller-line"><span class="opp-badge">Nessuna offerta Eccellente</span></div>`;
   }
 
   // Warning MIN apparente
@@ -807,6 +776,7 @@ async function doSearch() {
       <td><span class="scanning-cell">⟳ ...</span></td>
       <td><span class="scanning-cell">⟳ ...</span></td>
       <td><span class="scanning-cell">⟳ ...</span></td>
+      <td><span class="scanning-cell">⟳ ...</span></td>
       <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>
     </tr>`;
   }).join("");
@@ -819,12 +789,12 @@ async function doSearch() {
     <div class="markets-table-wrap">
       <table class="markets-table">
         <thead><tr>
-          <th>Mercato</th><th>Vendite/mese</th><th>Eccellente</th><th>Margine netto</th><th>Link</th>
+          <th>Mercato</th><th>Vendite/mese</th><th>Buy Box</th><th>Eccellente</th><th>Margine netto</th><th>Link</th>
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>
     </div>
-    <div class="token-info">Featured = Buy Box ufficiale Amazon. MIN reale = prezzo più basso tra tutte le offerte Eccellenti. Margine calcolato con IVA a margine Art.36.</div>
+    <div class="token-info">Buy Box = offerta principale Amazon (Featured). Eccellente = MIN reale tra tutte le offerte Eccellenti. Margine calcolato sul MIN reale con IVA a margine Art.36.</div>
   </div>`;
   result.style.display="block";
 
@@ -839,7 +809,7 @@ async function doSearch() {
     if (!mktAsin) {
       rowEl.innerHTML = `
         <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
-        <td colspan="3"><span class="price-val na">ASIN non disponibile</span></td>
+        <td colspan="4"><span class="price-val na">ASIN non disponibile</span></td>
         <td>—</td>`;
       continue;
     }
@@ -857,6 +827,7 @@ async function doSearch() {
         ? `<span class="price-val">${monthly}</span><div class="seller-line">unità/mese</div>`
         : '<span class="price-val na">—</span>';
 
+      const buyBoxCell = buildBuyBoxCell(data);
       const excellentCell = buildExcellentCell(data);
 
       // Per il margine: usa MIN reale TOTALE (prezzo + spedizione) se c'è, altrimenti Featured
@@ -872,6 +843,7 @@ async function doSearch() {
       rowEl.innerHTML=`
         <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
         <td>${monthlyStr}</td>
+        <td>${buyBoxCell}</td>
         <td>${excellentCell}</td>
         <td>${marginCell}</td>
         <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
@@ -879,7 +851,7 @@ async function doSearch() {
     } catch(e) {
       rowEl.innerHTML=`
         <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
-        <td colspan="3"><span class="price-val na">${e.message||"Errore"}</span></td>
+        <td colspan="4"><span class="price-val na">${e.message||"Errore"}</span></td>
         <td><a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a></td>`;
     }
 
