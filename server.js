@@ -157,12 +157,16 @@ app.get("/api/ninja", async (req, res) => {
 });
 
 // =============================================================
-// SCAN-ASIN — combinazione Keepa + SerpApi (formato per index.html)
+// EXTRACT SerpApi purchase_options — supporta percorsi multipli
 // =============================================================
 function extractSerpapiPurchaseOptions(serpapiData) {
-  const po = serpapiData?.product_results?.purchase_options || {};
+  // SerpApi può mettere purchase_options alla root o dentro product_results
+  const po = (serpapiData && serpapiData.purchase_options)
+          || (serpapiData && serpapiData.product_results && serpapiData.product_results.purchase_options)
+          || {};
   const out = {};
-  for (const key of ["refurbished_premium", "refurbished_excellent", "refurbished_good", "refurbished_acceptable"]) {
+  const keys = ["refurbished_premium", "refurbished_excellent", "refurbished_good", "refurbished_acceptable"];
+  for (const key of keys) {
     const arr = po[key];
     if (Array.isArray(arr) && arr.length > 0) {
       const first = arr[0];
@@ -171,7 +175,7 @@ function extractSerpapiPurchaseOptions(serpapiData) {
         : parsePrice(first.price);
       out[key] = {
         price: priceNum,
-        seller: first.seller || first.seller_name || null,
+        seller: first.seller || first.seller_name || first.merchant || null,
         available: !!priceNum,
       };
     } else {
@@ -181,6 +185,9 @@ function extractSerpapiPurchaseOptions(serpapiData) {
   return out;
 }
 
+// =============================================================
+// SCAN-ASIN — Keepa + SerpApi (formato per index.html)
+// =============================================================
 app.get("/api/scan-asin", async (req, res) => {
   const asin = req.query.asin;
   const domain = parseInt(req.query.domain || 8, 10);
@@ -188,22 +195,20 @@ app.get("/api/scan-asin", async (req, res) => {
 
   let keepaOk = false, serpapiOk = false;
   let title = null, monthlySold = null, amazonBuyBox = null;
-  let excellent = { price: null, seller: null, available: false };
-  let good = { price: null, seller: null, available: false };
+  let excellent  = { price: null, seller: null, available: false };
+  let good       = { price: null, seller: null, available: false };
   let acceptable = { price: null, seller: null, available: false };
-  let premium = { price: null, seller: null, available: false };
+  let premium    = { price: null, seller: null, available: false };
 
-  // Chiamate parallele
   const promises = [];
   promises.push(
     callKeepa(asin, domain, false).then(json => {
-      const p = json?.products?.[0];
+      const p = json && json.products && json.products[0];
       if (p) {
         keepaOk = true;
         title = p.title || null;
         if (typeof p.monthlySold === "number") monthlySold = p.monthlySold;
         const csv = p.csv || [];
-        // csv[1] = Amazon price history (in cents)
         if (Array.isArray(csv[1]) && csv[1].length >= 2) {
           const last = csv[1][csv[1].length - 1];
           if (typeof last === "number" && last > 0) amazonBuyBox = last;
@@ -215,12 +220,14 @@ app.get("/api/scan-asin", async (req, res) => {
     promises.push(
       callSerpapi(asin, domain).then(data => {
         serpapiOk = true;
-        if (!title && data?.product_results?.title) title = data.product_results.title;
+        if (!title && data && data.product_results && data.product_results.title) {
+          title = data.product_results.title;
+        }
         const po = extractSerpapiPurchaseOptions(data);
-        excellent = po.refurbished_excellent;
-        good = po.refurbished_good;
+        excellent  = po.refurbished_excellent;
+        good       = po.refurbished_good;
         acceptable = po.refurbished_acceptable;
-        premium = po.refurbished_premium;
+        premium    = po.refurbished_premium;
       }).catch(() => { serpapiOk = false; })
     );
   }
@@ -261,15 +268,15 @@ app.post("/api/bulk-scan", async (req, res) => {
       const domain = parseInt(it.domain || 8, 10);
       let keepaOk = false, serpapiOk = false;
       let title = null, monthlySold = null;
-      let excellent = { price: null, seller: null, available: false };
-      let good = { price: null, seller: null, available: false };
+      let excellent  = { price: null, seller: null, available: false };
+      let good       = { price: null, seller: null, available: false };
       let acceptable = { price: null, seller: null, available: false };
-      let premium = { price: null, seller: null, available: false };
+      let premium    = { price: null, seller: null, available: false };
 
       const promises = [];
       promises.push(
         callKeepa(asin, domain, false).then(json => {
-          const p = json?.products?.[0];
+          const p = json && json.products && json.products[0];
           if (p) {
             keepaOk = true;
             title = p.title || null;
@@ -282,10 +289,10 @@ app.post("/api/bulk-scan", async (req, res) => {
           callSerpapi(asin, domain).then(data => {
             serpapiOk = true;
             const po = extractSerpapiPurchaseOptions(data);
-            excellent = po.refurbished_excellent;
-            good = po.refurbished_good;
+            excellent  = po.refurbished_excellent;
+            good       = po.refurbished_good;
             acceptable = po.refurbished_acceptable;
-            premium = po.refurbished_premium;
+            premium    = po.refurbished_premium;
           }).catch(() => { serpapiOk = false; })
         );
       }
