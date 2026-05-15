@@ -230,7 +230,7 @@ app.get("/api/scan-asin", async (req, res) => {
   if (!asin) return res.status(400).json({ error: "asin required" });
 
   let keepaOk = false, serpapiOk = false, ninjaOk = false;
-  let title = null, monthlySold = null, amazonBuyBox = null;
+  let title = null, monthlySold = null, amazonBuyBox = null, salesRank = null;
   // Featured (SerpApi) — Buy Box ufficiale per condition
   let excellent  = { price: null, seller: null, available: false };
   let good       = { price: null, seller: null, available: false };
@@ -258,6 +258,21 @@ app.get("/api/scan-asin", async (req, res) => {
         if (Array.isArray(csv[1]) && csv[1].length >= 2) {
           const last = csv[1][csv[1].length - 1];
           if (typeof last === "number" && last > 0) amazonBuyBox = last;
+        }
+        // Sales Rank (BSR) — csv[3] è la serie storica del Sales Rank
+        if (Array.isArray(csv[3]) && csv[3].length >= 2) {
+          // Cerco l'ultimo valore valido (>0) partendo dalla fine
+          for (let i = csv[3].length - 1; i >= 0; i -= 2) {
+            const v = csv[3][i];
+            if (typeof v === "number" && v > 0) {
+              salesRank = v;
+              break;
+            }
+          }
+        }
+        // Fallback: stats.current[3] è il BSR attuale
+        if (!salesRank && p.stats && Array.isArray(p.stats.current) && p.stats.current[3] > 0) {
+          salesRank = p.stats.current[3];
         }
       }
     }).catch(() => { keepaOk = false; })
@@ -350,15 +365,44 @@ app.get("/api/scan-asin", async (req, res) => {
         goodMinReal       = buildMin("good");
         acceptableMinReal = buildMin("acceptable");
 
-        // BUY BOX EXCELLENT: prima offerta Eccellente nella lista product_offers
-        // (rappresenta ciò che vede l'utente medio non-Business sulla pagina prodotto Amazon)
-        const excellentList = enriched.filter(o => o.condition === "excellent");
-        if (excellentList.length > 0) {
-          const first = excellentList.sort((a, b) => a.rank - b.rank)[0];
+        // BUY BOX EXCELLENT:
+        // 1. Cerca in buy_boxes[] di Ninja (Buy Box ufficiale per condition, dato Amazon coerente con la pagina prodotto)
+        // 2. Trova seller corrispondente cercando per prezzo nelle product_offers
+        // 3. Fallback: prima offerta Excellent nella lista product_offers (se buy_boxes non ha Excellent)
+        const buyBoxes = Array.isArray(d.buy_boxes) ? d.buy_boxes : [];
+        const bbExcellent = buyBoxes.find(b => classifyCondition(b.title) === "excellent");
+
+        let bbPrice = null;
+        let bbSeller = null;
+        let bbIsFBA = false;
+
+        if (bbExcellent && bbExcellent.price) {
+          bbPrice = parsePrice(bbExcellent.price);
+          if (bbPrice) {
+            const match = enriched.filter(o => o.condition === "excellent" && Math.abs(o.price - bbPrice) < 0.5);
+            if (match.length > 0) {
+              bbSeller = match[0].seller;
+              bbIsFBA = match[0].isFBA;
+            }
+          }
+        }
+
+        // Fallback: se buy_boxes non aveva Excellent ma ci sono offerte Excellent in lista
+        if (!bbPrice) {
+          const excellentList = enriched.filter(o => o.condition === "excellent");
+          if (excellentList.length > 0) {
+            const first = excellentList.sort((a, b) => a.rank - b.rank)[0];
+            bbPrice = first.price;
+            bbSeller = first.seller;
+            bbIsFBA = first.isFBA;
+          }
+        }
+
+        if (bbPrice) {
           ninjaFeaturedExcellent = {
-            price: first.price,
-            seller: first.seller,
-            isFBA: first.isFBA,
+            price: bbPrice,
+            seller: bbSeller,
+            isFBA: bbIsFBA,
             available: true,
           };
         }
@@ -421,6 +465,7 @@ app.get("/api/scan-asin", async (req, res) => {
     market: MARKET_CODE[domain] || "IT",
     title: title,
     monthlySold: monthlySold,
+    salesRank: salesRank,
     amazonBuyBox: amazonBuyBox,
     // Featured (SerpApi)
     excellent: excellent,
