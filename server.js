@@ -242,7 +242,7 @@ app.get("/api/scan-asin", async (req, res) => {
   let acceptableMinReal = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
   // Featured da Ninja product_offers[0 Excellent] (variabile dedicata per evitare race con SerpApi)
   let ninjaFeaturedExcellent = null;
-  let recoverPosition   = { inList: false, rank: null, condition: null, price: null };
+  let recoverPosition   = { inList: false, rank: null, condition: null, price: null, isLowest: false, nextPrice: null, nextSeller: null, nextFeedback: null, ceilingPrice: null, priceGain: null };
 
   const promises = [];
 
@@ -292,6 +292,8 @@ app.get("/api/scan-asin", async (req, res) => {
         const enriched = offers.map(function (o, idx) {
           const p = priceFromOffer(o);
           const df = parseDeliveryFee(o.delivery_price);
+          const sellerLink = o.seller_link || "";
+          const isFBA = (o.ships_from === "Amazon") || /isAmazonFulfilled=1/.test(sellerLink);
           return {
             rank: idx + 1,
             price: p,
@@ -303,6 +305,7 @@ app.get("/api/scan-asin", async (req, res) => {
             sellerRating: parseSellerRating(o.seller_star_rating),
             positivePercent: parsePositivePercent(o.seller_star_rating_info),
             deliveryText: o.delivery_price || null,
+            isFBA: isFBA,
           };
         }).filter(function (o) { return o.price !== null; });
 
@@ -347,23 +350,53 @@ app.get("/api/scan-asin", async (req, res) => {
         goodMinReal       = buildMin("good");
         acceptableMinReal = buildMin("acceptable");
 
-        // FEATURED EXCELLENT = prima offerta Eccellente nella lista product_offers di Ninja
-        // (su Amazon corrisponde all'"Offerta consigliata" / Buy Box Excellent)
-        const excellentByRank = enriched
-          .filter(o => o.condition === "excellent")
-          .sort((a, b) => a.rank - b.rank);
-        if (excellentByRank.length > 0) {
-          const first = excellentByRank[0];
+        // BUY BOX EXCELLENT: prima offerta Eccellente nella lista product_offers
+        // (rappresenta ciò che vede l'utente medio non-Business sulla pagina prodotto Amazon)
+        const excellentList = enriched.filter(o => o.condition === "excellent");
+        if (excellentList.length > 0) {
+          const first = excellentList.sort((a, b) => a.rank - b.rank)[0];
           ninjaFeaturedExcellent = {
             price: first.price,
             seller: first.seller,
+            isFBA: first.isFBA,
             available: true,
           };
         }
 
         const myOffer = enriched.find(o => o.sellerId === RECOVER_SELLER_ID);
         if (myOffer) {
-          recoverPosition = { inList: true, rank: myOffer.rank, condition: myOffer.condition, price: myOffer.price };
+          recoverPosition = {
+            inList: true,
+            rank: myOffer.rank,
+            condition: myOffer.condition,
+            price: myOffer.price,
+            isLowest: false,
+            nextPrice: null,
+            nextSeller: null,
+            nextFeedback: null,
+            ceilingPrice: null,
+            priceGain: null,
+          };
+          // Se Recover è in condition Excellent, calcolo se è il più basso e il next competitor
+          if (myOffer.condition === "excellent") {
+            const otherExcellent = enriched
+              .filter(o => o.condition === "excellent" && o.sellerId !== RECOVER_SELLER_ID)
+              .sort((a, b) => a.totalPrice - b.totalPrice);
+            if (otherExcellent.length > 0) {
+              const next = otherExcellent[0];
+              if (myOffer.totalPrice < next.totalPrice) {
+                recoverPosition.isLowest = true;
+                recoverPosition.nextPrice = next.totalPrice;
+                recoverPosition.nextSeller = next.seller;
+                recoverPosition.nextFeedback = next.positivePercent;
+                recoverPosition.ceilingPrice = Math.round((next.totalPrice - 0.01) * 100) / 100;
+                recoverPosition.priceGain = Math.round((recoverPosition.ceilingPrice - myOffer.totalPrice) * 100) / 100;
+              }
+            } else {
+              // Recover unico Excellent
+              recoverPosition.isLowest = true;
+            }
+          }
         }
 
         if (monthlySold === null && d.sales_volume) {
