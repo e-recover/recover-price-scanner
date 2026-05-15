@@ -215,14 +215,22 @@ app.get("/api/scan-asin", async (req, res) => {
   const domain = parseInt(req.query.domain || 8, 10);
   if (!asin) return res.status(400).json({ error: "asin required" });
 
-  let keepaOk = false, serpapiOk = false;
+  let keepaOk = false, serpapiOk = false, ninjaOk = false;
   let title = null, monthlySold = null, amazonBuyBox = null;
+  // Featured (SerpApi) — Buy Box ufficiale per condition
   let excellent  = { price: null, seller: null, available: false };
   let good       = { price: null, seller: null, available: false };
   let acceptable = { price: null, seller: null, available: false };
   let premium    = { price: null, seller: null, available: false };
+  // MIN reale (Ninja) — più basso tra TUTTE le offerte di quella condition
+  let excellentMinReal  = { price: null, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false };
+  let goodMinReal       = { price: null, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false };
+  let acceptableMinReal = { price: null, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false };
+  let recoverPosition   = { inList: false, rank: null, condition: null, price: null };
 
   const promises = [];
+
+  // Keepa
   promises.push(
     callKeepa(asin, domain, false).then(json => {
       const p = json && json.products && json.products[0];
@@ -238,6 +246,8 @@ app.get("/api/scan-asin", async (req, res) => {
       }
     }).catch(() => { keepaOk = false; })
   );
+
+  // SerpApi (Featured)
   if (SERPAPI_KEY) {
     promises.push(
       callSerpapi(asin, domain).then(data => {
@@ -254,6 +264,53 @@ app.get("/api/scan-asin", async (req, res) => {
     );
   }
 
+  // Ninja (MIN reale + posizione Recover)
+  if (NINJA_KEY) {
+    promises.push(
+      callNinja(asin, domain).then(raw => {
+        ninjaOk = true;
+        const d = (raw && raw.data) || {};
+        if (!title && d.product_title) title = d.product_title;
+        const offers = Array.isArray(d.product_offers) ? d.product_offers : [];
+
+        const enriched = offers.map(function (o, idx) {
+          return {
+            rank: idx + 1,
+            price: priceFromOffer(o),
+            condition: classifyCondition(o.product_condition),
+            seller: o.seller || null,
+            sellerId: o.seller_id || null,
+            sellerRating: parseSellerRating(o.seller_star_rating),
+            positivePercent: parsePositivePercent(o.seller_star_rating_info),
+          };
+        }).filter(function (o) { return o.price !== null; });
+
+        function buildMin(cond) {
+          const list = enriched.filter(o => o.condition === cond).sort((a, b) => a.price - b.price);
+          const min = list[0] || null;
+          return min
+            ? { price: min.price, seller: min.seller, sellerId: min.sellerId, positivePercent: min.positivePercent, rank: min.rank, count: list.length, available: true }
+            : { price: null, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false };
+        }
+
+        excellentMinReal  = buildMin("excellent");
+        goodMinReal       = buildMin("good");
+        acceptableMinReal = buildMin("acceptable");
+
+        const myOffer = enriched.find(o => o.sellerId === RECOVER_SELLER_ID);
+        if (myOffer) {
+          recoverPosition = { inList: true, rank: myOffer.rank, condition: myOffer.condition, price: myOffer.price };
+        }
+
+        // Se SerpApi non ha trovato vendite mese ma Ninja sì
+        if (monthlySold === null && d.sales_volume) {
+          const n = parseMonthlySoldFromText(d.sales_volume);
+          if (n !== null) monthlySold = n;
+        }
+      }).catch(() => { ninjaOk = false; })
+    );
+  }
+
   await Promise.all(promises);
 
   res.json({
@@ -264,12 +321,21 @@ app.get("/api/scan-asin", async (req, res) => {
     title: title,
     monthlySold: monthlySold,
     amazonBuyBox: amazonBuyBox,
+    // Featured (SerpApi)
     excellent: excellent,
     good: good,
     acceptable: acceptable,
     premium: premium,
+    // MIN reale (Ninja)
+    excellentMinReal: excellentMinReal,
+    goodMinReal: goodMinReal,
+    acceptableMinReal: acceptableMinReal,
+    // Recover
+    recoverPosition: recoverPosition,
+    // Flags
     keepaOk: keepaOk,
     serpapiOk: serpapiOk,
+    ninjaOk: ninjaOk,
   });
 });
 
