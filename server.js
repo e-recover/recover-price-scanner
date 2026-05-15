@@ -118,7 +118,7 @@ app.get("/api/keepa-offers", async (req, res) => {
 // =============================================================
 async function callSerpapi(asin, domain) {
   const amazon_domain = SERPAPI_DOMAIN[domain] || "amazon.it";
-  const url = `https://serpapi.com/search.json?engine=amazon&amazon_domain=${amazon_domain}&asin=${asin}&api_key=${SERPAPI_KEY}`;
+  const url = `https://serpapi.com/search.json?engine=amazon_product&amazon_domain=${amazon_domain}&asin=${asin}&api_key=${SERPAPI_KEY}`;
   const r = await fetchWithTimeout(url, {}, 25000);
   if (!r.ok) throw new Error(`SerpApi status ${r.status}`);
   return await r.json();
