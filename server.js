@@ -53,6 +53,20 @@ function parsePositivePercent(info) {
   const m = String(info).match(/(\d{1,3})\s*%/);
   return m ? parseInt(m[1], 10) : null;
 }
+
+function parseDeliveryFee(s) {
+  if (!s) return 0;
+  const lower = String(s).toLowerCase().trim();
+  // Gratis / Free in IT, DE, FR, ES, EN
+  if (lower === "" || lower.includes("gratis") || lower.includes("free") || lower.includes("gratuit") || lower.includes("gratuito") || lower.includes("kostenlos") || lower.includes("frei")) return 0;
+  // Estrai numero (es. "por 9,99 €" → 9.99, "4,99 €" → 4.99)
+  const m = lower.match(/(\d+[.,]\d+|\d+)/);
+  if (m) {
+    const n = parsePrice(m[1]);
+    return (n !== null && n > 0) ? n : 0;
+  }
+  return 0;
+}
 function parseMonthlySoldFromText(s) {
   if (!s) return null;
   const m = String(s).match(/(\d{1,5})/);
@@ -222,10 +236,10 @@ app.get("/api/scan-asin", async (req, res) => {
   let good       = { price: null, seller: null, available: false };
   let acceptable = { price: null, seller: null, available: false };
   let premium    = { price: null, seller: null, available: false };
-  // MIN reale (Ninja) — più basso tra TUTTE le offerte di quella condition
-  let excellentMinReal  = { price: null, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false };
-  let goodMinReal       = { price: null, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false };
-  let acceptableMinReal = { price: null, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false };
+  // MIN reale (Ninja) — più basso TOTALE (prezzo + spedizione) tra tutte le offerte di quella condition
+  let excellentMinReal  = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
+  let goodMinReal       = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
+  let acceptableMinReal = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
   let recoverPosition   = { inList: false, rank: null, condition: null, price: null };
 
   const promises = [];
@@ -274,23 +288,62 @@ app.get("/api/scan-asin", async (req, res) => {
         const offers = Array.isArray(d.product_offers) ? d.product_offers : [];
 
         const enriched = offers.map(function (o, idx) {
+          const p = priceFromOffer(o);
+          const df = parseDeliveryFee(o.delivery_price);
           return {
             rank: idx + 1,
-            price: priceFromOffer(o),
+            price: p,
+            deliveryFee: df,
+            totalPrice: p !== null ? Math.round((p + df) * 100) / 100 : null,
             condition: classifyCondition(o.product_condition),
             seller: o.seller || null,
             sellerId: o.seller_id || null,
             sellerRating: parseSellerRating(o.seller_star_rating),
             positivePercent: parsePositivePercent(o.seller_star_rating_info),
+            deliveryText: o.delivery_price || null,
           };
         }).filter(function (o) { return o.price !== null; });
 
         function buildMin(cond) {
-          const list = enriched.filter(o => o.condition === cond).sort((a, b) => a.price - b.price);
-          const min = list[0] || null;
-          return min
-            ? { price: min.price, seller: min.seller, sellerId: min.sellerId, positivePercent: min.positivePercent, rank: min.rank, count: list.length, available: true }
-            : { price: null, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false };
+          const list = enriched.filter(o => o.condition === cond);
+          if (list.length === 0) {
+            return { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
+          }
+          // MIN reale = ordinato per totalPrice
+          const byTotal = [...list].sort((a, b) => a.totalPrice - b.totalPrice);
+          const minByTotal = byTotal[0];
+          // MIN apparente = ordinato per prezzo nominale
+          const byPrice = [...list].sort((a, b) => a.price - b.price);
+          const minByPrice = byPrice[0];
+
+          // Segnalo l'apparente solo se:
+          //  (1) è un seller diverso dal MIN totale
+          //  (2) il prezzo nominale è veramente più basso del totale MIN (sembra una offerta migliore)
+          let apparent = null;
+          if (minByPrice.sellerId !== minByTotal.sellerId && minByPrice.price < minByTotal.totalPrice) {
+            apparent = {
+              price: minByPrice.price,
+              deliveryFee: minByPrice.deliveryFee,
+              totalPrice: minByPrice.totalPrice,
+              seller: minByPrice.seller,
+              sellerId: minByPrice.sellerId,
+              positivePercent: minByPrice.positivePercent,
+              rank: minByPrice.rank,
+            };
+          }
+
+          return {
+            price: minByTotal.price,
+            totalPrice: minByTotal.totalPrice,
+            deliveryFee: minByTotal.deliveryFee,
+            seller: minByTotal.seller,
+            sellerId: minByTotal.sellerId,
+            positivePercent: minByTotal.positivePercent,
+            rank: minByTotal.rank,
+            count: list.length,
+            available: true,
+            apparentMin: apparent,
+          };
         }
 
         excellentMinReal  = buildMin("excellent");
@@ -302,7 +355,6 @@ app.get("/api/scan-asin", async (req, res) => {
           recoverPosition = { inList: true, rank: myOffer.rank, condition: myOffer.condition, price: myOffer.price };
         }
 
-        // Se SerpApi non ha trovato vendite mese ma Ninja sì
         if (monthlySold === null && d.sales_volume) {
           const n = parseMonthlySoldFromText(d.sales_volume);
           if (n !== null) monthlySold = n;
