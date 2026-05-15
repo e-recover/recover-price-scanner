@@ -690,27 +690,29 @@ function buildExcellentCell(data) {
   const hasFeatured = featured && featured.available && featured.price;
   const hasMinReal = minReal && minReal.available && minReal.totalPrice;
 
-  // Il prezzo "rilevante" è il TOTALE
   const minTotal = hasMinReal ? minReal.totalPrice : null;
   const same = hasFeatured && hasMinReal && Math.abs(featured.price - minTotal) < 0.5;
 
   let html = '<div class="price-block">';
 
-  // Dettaglio spedizione del MIN (se non gratis)
-  function deliveryDetail(min) {
-    if (!min || !min.deliveryFee || min.deliveryFee <= 0) return '';
-    return `<span style="font-size:9px;color:#8890aa;">€${min.price.toFixed(2)} + €${min.deliveryFee.toFixed(2)} sped.</span>`;
+  // Stato spedizione (sempre mostrato)
+  function deliveryLine(fee) {
+    if (fee === null || fee === undefined) return '';
+    if (fee === 0) {
+      return '<div style="font-size:10px;color:#48bb78;margin-top:2px;">📦 Spedizione gratuita</div>';
+    }
+    return `<div style="font-size:10px;color:#f59e0b;margin-top:2px;">📦 + €${fee.toFixed(2)} spedizione</div>`;
   }
 
-  // Caso 1: Featured = MIN reale (più semplice)
+  // Caso 1: Featured = MIN reale
   if (same) {
     html += `<div class="price-line">
       <span class="price-tag min">MIN</span>
       <span class="price-val" data-val="${minTotal}">€${minTotal.toFixed(2)}</span>
       ${feedbackBadge(minReal.positivePercent)}
     </div>
-    ${deliveryDetail(minReal)}
-    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>`;
+    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>
+    ${deliveryLine(minReal.deliveryFee)}`;
   }
   // Caso 2: Featured ≠ MIN reale
   else if (hasFeatured && hasMinReal) {
@@ -725,8 +727,8 @@ function buildExcellentCell(data) {
       <span class="price-val" data-val="${minTotal}" style="color:#f59e0b;">€${minTotal.toFixed(2)}</span>
       ${feedbackBadge(minReal.positivePercent)}
     </div>
-    ${deliveryDetail(minReal)}
-    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>`;
+    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>
+    ${deliveryLine(minReal.deliveryFee)}`;
   }
   // Caso 3: solo Featured
   else if (hasFeatured) {
@@ -746,8 +748,8 @@ function buildExcellentCell(data) {
       <span class="price-val" data-val="${minTotal}" style="color:#f59e0b;">€${minTotal.toFixed(2)}</span>
       ${feedbackBadge(minReal.positivePercent)}
     </div>
-    ${deliveryDetail(minReal)}
-    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'} Eccellenti</div>`;
+    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'} Eccellenti</div>
+    ${deliveryLine(minReal.deliveryFee)}`;
   }
   // Caso 5: niente
   else {
@@ -755,7 +757,7 @@ function buildExcellentCell(data) {
     <div class="seller-line"><span class="opp-badge">Nessuna concorrenza Eccellente</span></div>`;
   }
 
-  // Warning MIN apparente (prezzo nominale più basso ma con spedizione costosa)
+  // Warning MIN apparente
   if (hasMinReal && minReal.apparentMin) {
     const app = minReal.apparentMin;
     html += `<div style="margin-top:6px;padding:5px 7px;background:rgba(245,158,11,0.08);border-left:2px solid #f59e0b;border-radius:3px;font-size:10px;line-height:1.4;">
