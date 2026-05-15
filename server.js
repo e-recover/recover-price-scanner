@@ -1,13 +1,10 @@
 // =============================================================
-// RECOVER PRICE SCANNER — server.js
+// RECOVER PRICE SCANNER — server.js (CommonJS)
 // Versione con endpoint /api/scan-asin-deep (Ninja + condition parsing)
 // =============================================================
 
-import express from "express";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-
-dotenv.config();
+const express = require("express");
+const fetch = require("node-fetch");
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -25,12 +22,9 @@ const NINJA_KEY    = process.env.NINJA_KEY        || "";
 const RECOVER_SELLER_ID = "A2L7F1YZ0EWD52";
 
 // =============================================================
-// MAPPING DOMINI
+// MAPPING DOMINI — Keepa: 8=IT, 3=DE, 4=FR, 9=ES
 // =============================================================
-// Keepa: 8=IT, 3=DE, 4=FR, 9=ES
-// Ninja country code:
 const NINJA_COUNTRY = { 8: "IT", 3: "DE", 4: "FR", 9: "ES" };
-// SerpApi amazon_domain:
 const SERPAPI_DOMAIN = {
   8: "amazon.it",
   3: "amazon.de",
@@ -44,7 +38,10 @@ const SERPAPI_DOMAIN = {
 function parsePrice(s) {
   if (s === null || s === undefined) return null;
   if (typeof s === "number") return s;
-  const cleaned = String(s).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".");
+  const cleaned = String(s)
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\.(?=\d{3}(\D|$))/g, "")
+    .replace(",", ".");
   const n = parseFloat(cleaned);
   return isNaN(n) ? null : Math.round(n * 100) / 100;
 }
@@ -67,43 +64,30 @@ function parseMonthlySoldFromText(s) {
   return m ? parseInt(m[1], 10) : null;
 }
 
-// Classifica condition multilingua (IT/DE/FR/ES/EN)
 function classifyCondition(raw) {
   if (!raw) return "unknown";
   const s = String(raw).toLowerCase();
-
-  // Premium / Like New
   if (s.includes("premium") || s.includes("like new") || s.includes("come nuovo") || s.includes("comme neuf") || s.includes("como nuevo") || s.includes("wie neu")) return "premium";
-
-  // Excellent (top tier post-premium, oppure top tier reale)
-  // DE Amazon usa "Sehr gut" come Excellent, IT "Eccellente", FR "Excellent", ES "Excelente"
   if (s.includes("excellent") || s.includes("eccellente") || s.includes("excelente") || s.includes("sehr gut") || s.includes("ausgezeichnet")) return "excellent";
-
-  // Very good (alcune lingue separano)
   if (s.includes("very good") || s.includes("molto buono") || s.includes("très bon") || s.includes("muy bueno")) return "very_good";
-
-  // Acceptable (controlla PRIMA di good, altrimenti "good" matcherebbe in alcuni casi)
   if (s.includes("acceptable") || s.includes("accettabile") || s.includes("aceptable") || s.includes("akzeptabel") || s.includes("correct")) return "acceptable";
-
-  // Good
   if (s.includes("good") || s.includes("buono") || s.includes("bueno") || s.includes(" gut") || s.includes("- gut") || s.includes("bon")) return "good";
-
   return "unknown";
 }
 
-// Estrae prezzo numerico da product_price o product_offers[].product_price
 function priceFromOffer(o) {
   if (!o) return null;
-  const raw = o.product_price ?? o.price ?? null;
+  const raw = (o.product_price !== undefined && o.product_price !== null) ? o.product_price : o.price;
   return parsePrice(raw);
 }
 
-// Wrap fetch con timeout
-async function fetchWithTimeout(url, opts = {}, timeoutMs = 20000) {
+async function fetchWithTimeout(url, opts, timeoutMs) {
+  opts = opts || {};
+  timeoutMs = timeoutMs || 20000;
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const t = setTimeout(function () { ctrl.abort(); }, timeoutMs);
   try {
-    const r = await fetch(url, { ...opts, signal: ctrl.signal });
+    const r = await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
     return r;
   } finally {
     clearTimeout(t);
@@ -111,11 +95,12 @@ async function fetchWithTimeout(url, opts = {}, timeoutMs = 20000) {
 }
 
 // =============================================================
-// KEEPA — standard
+// KEEPA
 // =============================================================
 app.get("/api/keepa", async (req, res) => {
   if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY not configured" });
-  const { asin, domain = 8 } = req.query;
+  const asin = req.query.asin;
+  const domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
   try {
     const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=30`;
@@ -127,12 +112,10 @@ app.get("/api/keepa", async (req, res) => {
   }
 });
 
-// =============================================================
-// KEEPA — offers=20 + condition (Eccellente = code 6)
-// =============================================================
 app.get("/api/keepa-offers", async (req, res) => {
   if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY not configured" });
-  const { asin, domain = 8 } = req.query;
+  const asin = req.query.asin;
+  const domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
   try {
     const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&offers=20&stats=30`;
@@ -149,7 +132,8 @@ app.get("/api/keepa-offers", async (req, res) => {
 // =============================================================
 app.get("/api/serpapi", async (req, res) => {
   if (!SERPAPI_KEY) return res.status(400).json({ error: "SERPAPI_KEY not configured" });
-  const { asin, domain = 8 } = req.query;
+  const asin = req.query.asin;
+  const domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
   const amazon_domain = SERPAPI_DOMAIN[domain] || "amazon.it";
   try {
@@ -163,7 +147,7 @@ app.get("/api/serpapi", async (req, res) => {
 });
 
 // =============================================================
-// NINJA / RapidAPI Real-Time Amazon Data — endpoint /product-offers
+// NINJA / RapidAPI
 // =============================================================
 async function callNinja(asin, domain) {
   const country = NINJA_COUNTRY[domain] || "IT";
@@ -180,7 +164,8 @@ async function callNinja(asin, domain) {
 
 app.get("/api/ninja", async (req, res) => {
   if (!NINJA_KEY) return res.status(400).json({ error: "Ninja/RapidAPI key not configured" });
-  const { asin, domain = 8 } = req.query;
+  const asin = req.query.asin;
+  const domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
   try {
     const data = await callNinja(asin, parseInt(domain, 10));
@@ -193,69 +178,54 @@ app.get("/api/ninja", async (req, res) => {
 // =============================================================
 // /api/scan-asin-deep
 // =============================================================
-// Usa SOLO Ninja (product-offers). Estrae:
-//  - featured (Buy Box principale) con condition esplicita
-//  - excellent/good/acceptable/premium: count + MIN + lista offerte
-//  - vendite mese (da sales_volume)
-//  - posizione Recover nella lista (se presente)
-// =============================================================
 app.get("/api/scan-asin-deep", async (req, res) => {
   if (!NINJA_KEY) return res.status(400).json({ error: "Ninja key not configured" });
-  const { asin, domain = 8 } = req.query;
+  const asin = req.query.asin;
+  const domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
 
   try {
     const raw = await callNinja(asin, parseInt(domain, 10));
-    const d = raw?.data || {};
+    const d = (raw && raw.data) || {};
     const offers = Array.isArray(d.product_offers) ? d.product_offers : [];
 
-    // Classifica ogni offerta
-    const enriched = offers.map((o, idx) => ({
-      rank: idx + 1,
-      price: priceFromOffer(o),
-      condition: classifyCondition(o.product_condition),
-      rawCondition: o.product_condition || null,
-      seller: o.seller || null,
-      sellerId: o.seller_id || null,
-      sellerRating: parseSellerRating(o.seller_star_rating),
-      positivePercent: parsePositivePercent(o.seller_star_rating_info),
-      delivery: o.delivery_price || null,
-      deliveryTime: o.delivery_time || null,
-    })).filter(o => o.price !== null);
-
-    // Helper raggruppa per condition
-    const groupBy = (cond) => {
-      const list = enriched.filter(o => o.condition === cond).sort((a, b) => a.price - b.price);
+    const enriched = offers.map(function (o, idx) {
       return {
-        count: list.length,
-        min: list[0] || null,
-        offers: list,
+        rank: idx + 1,
+        price: priceFromOffer(o),
+        condition: classifyCondition(o.product_condition),
+        rawCondition: o.product_condition || null,
+        seller: o.seller || null,
+        sellerId: o.seller_id || null,
+        sellerRating: parseSellerRating(o.seller_star_rating),
+        positivePercent: parsePositivePercent(o.seller_star_rating_info),
+        delivery: o.delivery_price || null,
+        deliveryTime: o.delivery_time || null,
       };
-    };
+    }).filter(function (o) { return o.price !== null; });
 
-    // Featured = quella in product_price del prodotto
-    const featuredPriceRaw = d.product_price ?? null;
-    const featuredCondition = classifyCondition(d.product_condition);
+    function groupBy(cond) {
+      const list = enriched
+        .filter(function (o) { return o.condition === cond; })
+        .sort(function (a, b) { return a.price - b.price; });
+      return { count: list.length, min: list[0] || null, offers: list };
+    }
+
     const featured = {
-      price: parsePrice(featuredPriceRaw),
-      condition: featuredCondition,
+      price: parsePrice(d.product_price),
+      condition: classifyCondition(d.product_condition),
       rawCondition: d.product_condition || null,
     };
 
-    // Vendite mese
     const salesVolumeText = d.sales_volume || null;
     const monthlySold = parseMonthlySoldFromText(salesVolumeText);
+    const recoverOffer = enriched.find(function (o) { return o.sellerId === RECOVER_SELLER_ID; }) || null;
 
-    // Posizione Recover
-    const recoverOffer = enriched.find(o => o.sellerId === RECOVER_SELLER_ID) || null;
-
-    // Stato competitivo
     const excellent = groupBy("excellent");
     const good = groupBy("good");
     const acceptable = groupBy("acceptable");
     const premium = groupBy("premium");
 
-    // Suggerimento veloce: se Recover non è in lista, suggerisci prezzo a MIN-1
     let suggestion = null;
     if (excellent.min) {
       if (recoverOffer && recoverOffer.condition === "excellent") {
@@ -281,25 +251,22 @@ app.get("/api/scan-asin-deep", async (req, res) => {
 
     res.json({
       ok: true,
-      asin,
+      asin: asin,
       domain: parseInt(domain, 10),
       market: NINJA_COUNTRY[domain] || "IT",
       title: d.product_title || null,
       productUrl: d.product_url || null,
       totalOffersInListing: d.product_num_offers || null,
       offersReturned: offers.length,
-      salesVolumeText,
-      monthlySold,
-      featured,
-      excellent,
-      good,
-      acceptable,
-      premium,
-      recover: {
-        inList: !!recoverOffer,
-        offer: recoverOffer,
-      },
-      suggestion,
+      salesVolumeText: salesVolumeText,
+      monthlySold: monthlySold,
+      featured: featured,
+      excellent: excellent,
+      good: good,
+      acceptable: acceptable,
+      premium: premium,
+      recover: { inList: !!recoverOffer, offer: recoverOffer },
+      suggestion: suggestion,
       fetchedAt: new Date().toISOString(),
     });
   } catch (e) {
@@ -308,11 +275,11 @@ app.get("/api/scan-asin-deep", async (req, res) => {
 });
 
 // =============================================================
-// BACK MARKET — listings per singolo mercato
+// BACK MARKET
 // =============================================================
 app.get("/api/backmarket/listings", async (req, res) => {
   if (!BM_KEY) return res.status(400).json({ error: "BM key not configured" });
-  const market = (req.query.market || "FR").toLowerCase();
+  const market = String(req.query.market || "FR").toLowerCase();
   const hosts = {
     fr: "https://www.backmarket.fr",
     de: "https://www.backmarket.de",
@@ -331,15 +298,12 @@ app.get("/api/backmarket/listings", async (req, res) => {
       },
     }, 25000);
     const data = await r.json();
-    res.json({ market: market.toUpperCase(), data });
+    res.json({ market: market.toUpperCase(), data: data });
   } catch (e) {
     res.status(500).json({ error: `BM listings error: ${e.message}` });
   }
 });
 
-// =============================================================
-// BACK MARKET — tutti i mercati IT/FR/DE/ES/NL in parallelo
-// =============================================================
 app.get("/api/backmarket/all", async (req, res) => {
   if (!BM_KEY) return res.status(400).json({ error: "BM key not configured" });
   const markets = ["it", "fr", "de", "es", "nl"];
@@ -351,7 +315,7 @@ app.get("/api/backmarket/all", async (req, res) => {
     nl: "https://www.backmarket.nl",
   };
   try {
-    const results = await Promise.all(markets.map(async (m) => {
+    const results = await Promise.all(markets.map(async function (m) {
       try {
         const r = await fetchWithTimeout(`${hosts[m]}/ws/listings`, {
           headers: {
@@ -361,52 +325,52 @@ app.get("/api/backmarket/all", async (req, res) => {
           },
         }, 25000);
         const data = await r.json();
-        return { market: m.toUpperCase(), ok: true, data };
+        return { market: m.toUpperCase(), ok: true, data: data };
       } catch (err) {
         return { market: m.toUpperCase(), ok: false, error: err.message };
       }
     }));
-    res.json({ results });
+    res.json({ results: results });
   } catch (e) {
     res.status(500).json({ error: `BM all error: ${e.message}` });
   }
 });
 
 // =============================================================
-// BULK PRICE (Report Fornitore) — preservato come è
+// BULK PRICE
 // =============================================================
 app.post("/api/bulk-price", async (req, res) => {
-  const items = req.body?.items;
+  const items = req.body && req.body.items;
   if (!Array.isArray(items)) return res.status(400).json({ error: "items[] required" });
   const out = [];
   const batchSize = 5;
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
-    const batchRes = await Promise.all(batch.map(async (it) => {
+    const batchRes = await Promise.all(batch.map(async function (it) {
       try {
         const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${it.domain}&asin=${it.asin}&offers=20&stats=30`;
         const r = await fetchWithTimeout(url);
         const json = await r.json();
-        const p = json?.products?.[0];
+        const p = json && json.products && json.products[0];
         return {
           asin: it.asin,
           domain: it.domain,
-          title: p?.title || null,
-          monthlySold: p?.monthlySold || null,
-          offers: p?.offers || [],
+          title: (p && p.title) || null,
+          monthlySold: (p && p.monthlySold) || null,
+          offers: (p && p.offers) || [],
           ok: true,
         };
       } catch (err) {
         return { asin: it.asin, domain: it.domain, ok: false, error: err.message };
       }
     }));
-    out.push(...batchRes);
+    out.push.apply(out, batchRes);
   }
   res.json({ count: out.length, results: out });
 });
 
 // =============================================================
-// HEALTH CHECK
+// HEALTH
 // =============================================================
 app.get("/api/health", (req, res) => {
   res.json({
@@ -432,6 +396,6 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, function () {
   console.log(`Recover Price Scanner running on port ${PORT}`);
 });
