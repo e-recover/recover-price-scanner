@@ -1,6 +1,9 @@
 // =============================================================
 // RECOVER PRICE SCANNER — server.js (CommonJS)
-// Versione con endpoint /api/scan-asin-deep (Ninja + condition parsing)
+// Endpoint:
+//   /api/health, /api/keepa, /api/keepa-offers, /api/serpapi,
+//   /api/ninja, /api/scan-asin, /api/bulk-scan, /api/scan-asin-deep,
+//   /api/backmarket/listings, /api/backmarket/all, /api/bulk-price
 // =============================================================
 
 const express = require("express");
@@ -18,22 +21,17 @@ const SERPAPI_KEY  = process.env.SERPAPI_KEY      || "";
 const BM_KEY       = process.env.BM_API_KEY || process.env.BM_KEY || "";
 const NINJA_KEY    = process.env.NINJA_KEY        || "";
 
-// Recover seller ID Amazon EU
 const RECOVER_SELLER_ID = "A2L7F1YZ0EWD52";
 
 // =============================================================
 // MAPPING DOMINI — Keepa: 8=IT, 3=DE, 4=FR, 9=ES
 // =============================================================
-const NINJA_COUNTRY = { 8: "IT", 3: "DE", 4: "FR", 9: "ES" };
-const SERPAPI_DOMAIN = {
-  8: "amazon.it",
-  3: "amazon.de",
-  4: "amazon.fr",
-  9: "amazon.es",
-};
+const NINJA_COUNTRY  = { 8: "IT", 3: "DE", 4: "FR", 9: "ES" };
+const SERPAPI_DOMAIN = { 8: "amazon.it", 3: "amazon.de", 4: "amazon.fr", 9: "amazon.es" };
+const MARKET_CODE    = { 8: "IT", 3: "DE", 4: "FR", 9: "ES" };
 
 // =============================================================
-// HELPER — parsing prezzi e condition
+// HELPER — parsing
 // =============================================================
 function parsePrice(s) {
   if (s === null || s === undefined) return null;
@@ -45,25 +43,21 @@ function parsePrice(s) {
   const n = parseFloat(cleaned);
   return isNaN(n) ? null : Math.round(n * 100) / 100;
 }
-
 function parseSellerRating(s) {
   if (!s) return null;
   const n = parseFloat(String(s).replace(",", "."));
   return isNaN(n) ? null : n;
 }
-
 function parsePositivePercent(info) {
   if (!info) return null;
   const m = String(info).match(/(\d{1,3})\s*%/);
   return m ? parseInt(m[1], 10) : null;
 }
-
 function parseMonthlySoldFromText(s) {
   if (!s) return null;
   const m = String(s).match(/(\d{1,5})/);
   return m ? parseInt(m[1], 10) : null;
 }
-
 function classifyCondition(raw) {
   if (!raw) return "unknown";
   const s = String(raw).toLowerCase();
@@ -74,7 +68,6 @@ function classifyCondition(raw) {
   if (s.includes("good") || s.includes("buono") || s.includes("bueno") || s.includes(" gut") || s.includes("- gut") || s.includes("bon")) return "good";
   return "unknown";
 }
-
 function priceFromOffer(o) {
   if (!o) return null;
   const raw = (o.product_price !== undefined && o.product_price !== null) ? o.product_price : o.price;
@@ -87,8 +80,7 @@ async function fetchWithTimeout(url, opts, timeoutMs) {
   const ctrl = new AbortController();
   const t = setTimeout(function () { ctrl.abort(); }, timeoutMs);
   try {
-    const r = await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
-    return r;
+    return await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
   } finally {
     clearTimeout(t);
   }
@@ -97,53 +89,47 @@ async function fetchWithTimeout(url, opts, timeoutMs) {
 // =============================================================
 // KEEPA
 // =============================================================
+async function callKeepa(asin, domain, offers) {
+  const offersParam = offers ? `&offers=20` : "";
+  const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}${offersParam}&stats=30`;
+  const r = await fetchWithTimeout(url, {}, 25000);
+  if (!r.ok) throw new Error(`Keepa status ${r.status}`);
+  return await r.json();
+}
+
 app.get("/api/keepa", async (req, res) => {
   if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY not configured" });
-  const asin = req.query.asin;
-  const domain = req.query.domain || 8;
+  const asin = req.query.asin, domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
-  try {
-    const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&stats=30`;
-    const r = await fetchWithTimeout(url);
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: `Keepa error: ${e.message}` });
-  }
+  try { res.json(await callKeepa(asin, domain, false)); }
+  catch (e) { res.status(500).json({ error: `Keepa error: ${e.message}` }); }
 });
 
 app.get("/api/keepa-offers", async (req, res) => {
   if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY not configured" });
-  const asin = req.query.asin;
-  const domain = req.query.domain || 8;
+  const asin = req.query.asin, domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
-  try {
-    const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}&offers=20&stats=30`;
-    const r = await fetchWithTimeout(url);
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: `Keepa-offers error: ${e.message}` });
-  }
+  try { res.json(await callKeepa(asin, domain, true)); }
+  catch (e) { res.status(500).json({ error: `Keepa-offers error: ${e.message}` }); }
 });
 
 // =============================================================
 // SERPAPI
 // =============================================================
+async function callSerpapi(asin, domain) {
+  const amazon_domain = SERPAPI_DOMAIN[domain] || "amazon.it";
+  const url = `https://serpapi.com/search.json?engine=amazon&amazon_domain=${amazon_domain}&asin=${asin}&api_key=${SERPAPI_KEY}`;
+  const r = await fetchWithTimeout(url, {}, 25000);
+  if (!r.ok) throw new Error(`SerpApi status ${r.status}`);
+  return await r.json();
+}
+
 app.get("/api/serpapi", async (req, res) => {
   if (!SERPAPI_KEY) return res.status(400).json({ error: "SERPAPI_KEY not configured" });
-  const asin = req.query.asin;
-  const domain = req.query.domain || 8;
+  const asin = req.query.asin, domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
-  const amazon_domain = SERPAPI_DOMAIN[domain] || "amazon.it";
-  try {
-    const url = `https://serpapi.com/search.json?engine=amazon&amazon_domain=${amazon_domain}&asin=${asin}&api_key=${SERPAPI_KEY}`;
-    const r = await fetchWithTimeout(url);
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: `SerpApi error: ${e.message}` });
-  }
+  try { res.json(await callSerpapi(asin, domain)); }
+  catch (e) { res.status(500).json({ error: `SerpApi error: ${e.message}` }); }
 });
 
 // =============================================================
@@ -164,24 +150,167 @@ async function callNinja(asin, domain) {
 
 app.get("/api/ninja", async (req, res) => {
   if (!NINJA_KEY) return res.status(400).json({ error: "Ninja/RapidAPI key not configured" });
-  const asin = req.query.asin;
-  const domain = req.query.domain || 8;
+  const asin = req.query.asin, domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
-  try {
-    const data = await callNinja(asin, parseInt(domain, 10));
-    res.json(data);
-  } catch (e) {
-    res.status(500).json({ error: `Ninja error: ${e.message}` });
-  }
+  try { res.json(await callNinja(asin, parseInt(domain, 10))); }
+  catch (e) { res.status(500).json({ error: `Ninja error: ${e.message}` }); }
 });
 
 // =============================================================
-// /api/scan-asin-deep
+// SCAN-ASIN — combinazione Keepa + SerpApi (formato per index.html)
+// =============================================================
+function extractSerpapiPurchaseOptions(serpapiData) {
+  const po = serpapiData?.product_results?.purchase_options || {};
+  const out = {};
+  for (const key of ["refurbished_premium", "refurbished_excellent", "refurbished_good", "refurbished_acceptable"]) {
+    const arr = po[key];
+    if (Array.isArray(arr) && arr.length > 0) {
+      const first = arr[0];
+      const priceNum = (typeof first.extracted_price === "number")
+        ? first.extracted_price
+        : parsePrice(first.price);
+      out[key] = {
+        price: priceNum,
+        seller: first.seller || first.seller_name || null,
+        available: !!priceNum,
+      };
+    } else {
+      out[key] = { price: null, seller: null, available: false };
+    }
+  }
+  return out;
+}
+
+app.get("/api/scan-asin", async (req, res) => {
+  const asin = req.query.asin;
+  const domain = parseInt(req.query.domain || 8, 10);
+  if (!asin) return res.status(400).json({ error: "asin required" });
+
+  let keepaOk = false, serpapiOk = false;
+  let title = null, monthlySold = null, amazonBuyBox = null;
+  let excellent = { price: null, seller: null, available: false };
+  let good = { price: null, seller: null, available: false };
+  let acceptable = { price: null, seller: null, available: false };
+  let premium = { price: null, seller: null, available: false };
+
+  // Chiamate parallele
+  const promises = [];
+  promises.push(
+    callKeepa(asin, domain, false).then(json => {
+      const p = json?.products?.[0];
+      if (p) {
+        keepaOk = true;
+        title = p.title || null;
+        if (typeof p.monthlySold === "number") monthlySold = p.monthlySold;
+        const csv = p.csv || [];
+        // csv[1] = Amazon price history (in cents)
+        if (Array.isArray(csv[1]) && csv[1].length >= 2) {
+          const last = csv[1][csv[1].length - 1];
+          if (typeof last === "number" && last > 0) amazonBuyBox = last;
+        }
+      }
+    }).catch(() => { keepaOk = false; })
+  );
+  if (SERPAPI_KEY) {
+    promises.push(
+      callSerpapi(asin, domain).then(data => {
+        serpapiOk = true;
+        if (!title && data?.product_results?.title) title = data.product_results.title;
+        const po = extractSerpapiPurchaseOptions(data);
+        excellent = po.refurbished_excellent;
+        good = po.refurbished_good;
+        acceptable = po.refurbished_acceptable;
+        premium = po.refurbished_premium;
+      }).catch(() => { serpapiOk = false; })
+    );
+  }
+
+  await Promise.all(promises);
+
+  res.json({
+    ok: true,
+    asin: asin,
+    domain: domain,
+    market: MARKET_CODE[domain] || "IT",
+    title: title,
+    monthlySold: monthlySold,
+    amazonBuyBox: amazonBuyBox,
+    excellent: excellent,
+    good: good,
+    acceptable: acceptable,
+    premium: premium,
+    keepaOk: keepaOk,
+    serpapiOk: serpapiOk,
+  });
+});
+
+// =============================================================
+// BULK-SCAN — versione massiva di scan-asin
+// =============================================================
+app.post("/api/bulk-scan", async (req, res) => {
+  const items = req.body && req.body.items;
+  if (!Array.isArray(items)) return res.status(400).json({ error: "items[] required" });
+
+  const out = [];
+  const batchSize = 5;
+
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchRes = await Promise.all(batch.map(async function (it) {
+      const asin = it.asin;
+      const domain = parseInt(it.domain || 8, 10);
+      let keepaOk = false, serpapiOk = false;
+      let title = null, monthlySold = null;
+      let excellent = { price: null, seller: null, available: false };
+      let good = { price: null, seller: null, available: false };
+      let acceptable = { price: null, seller: null, available: false };
+      let premium = { price: null, seller: null, available: false };
+
+      const promises = [];
+      promises.push(
+        callKeepa(asin, domain, false).then(json => {
+          const p = json?.products?.[0];
+          if (p) {
+            keepaOk = true;
+            title = p.title || null;
+            if (typeof p.monthlySold === "number") monthlySold = p.monthlySold;
+          }
+        }).catch(() => { keepaOk = false; })
+      );
+      if (SERPAPI_KEY) {
+        promises.push(
+          callSerpapi(asin, domain).then(data => {
+            serpapiOk = true;
+            const po = extractSerpapiPurchaseOptions(data);
+            excellent = po.refurbished_excellent;
+            good = po.refurbished_good;
+            acceptable = po.refurbished_acceptable;
+            premium = po.refurbished_premium;
+          }).catch(() => { serpapiOk = false; })
+        );
+      }
+
+      await Promise.all(promises);
+      return {
+        asin: asin, domain: domain,
+        market: MARKET_CODE[domain] || "IT",
+        title: title, monthlySold: monthlySold,
+        excellent: excellent, good: good, acceptable: acceptable, premium: premium,
+        keepaOk: keepaOk, serpapiOk: serpapiOk,
+      };
+    }));
+    out.push.apply(out, batchRes);
+  }
+
+  res.json({ count: out.length, results: out });
+});
+
+// =============================================================
+// SCAN-ASIN-DEEP — Ninja con MIN reale + seller + posizione Recover
 // =============================================================
 app.get("/api/scan-asin-deep", async (req, res) => {
   if (!NINJA_KEY) return res.status(400).json({ error: "Ninja key not configured" });
-  const asin = req.query.asin;
-  const domain = req.query.domain || 8;
+  const asin = req.query.asin, domain = req.query.domain || 8;
   if (!asin) return res.status(400).json({ error: "asin required" });
 
   try {
@@ -250,9 +379,7 @@ app.get("/api/scan-asin-deep", async (req, res) => {
     }
 
     res.json({
-      ok: true,
-      asin: asin,
-      domain: parseInt(domain, 10),
+      ok: true, asin: asin, domain: parseInt(domain, 10),
       market: NINJA_COUNTRY[domain] || "IT",
       title: d.product_title || null,
       productUrl: d.product_url || null,
@@ -261,10 +388,7 @@ app.get("/api/scan-asin-deep", async (req, res) => {
       salesVolumeText: salesVolumeText,
       monthlySold: monthlySold,
       featured: featured,
-      excellent: excellent,
-      good: good,
-      acceptable: acceptable,
-      premium: premium,
+      excellent: excellent, good: good, acceptable: acceptable, premium: premium,
       recover: { inList: !!recoverOffer, offer: recoverOffer },
       suggestion: suggestion,
       fetchedAt: new Date().toISOString(),
@@ -277,25 +401,22 @@ app.get("/api/scan-asin-deep", async (req, res) => {
 // =============================================================
 // BACK MARKET
 // =============================================================
+const BM_HOSTS = {
+  fr: "https://www.backmarket.fr",
+  de: "https://www.backmarket.de",
+  it: "https://www.backmarket.it",
+  es: "https://www.backmarket.es",
+  nl: "https://www.backmarket.nl",
+};
+
 app.get("/api/backmarket/listings", async (req, res) => {
   if (!BM_KEY) return res.status(400).json({ error: "BM key not configured" });
   const market = String(req.query.market || "FR").toLowerCase();
-  const hosts = {
-    fr: "https://www.backmarket.fr",
-    de: "https://www.backmarket.de",
-    it: "https://www.backmarket.it",
-    es: "https://www.backmarket.es",
-    nl: "https://www.backmarket.nl",
-  };
-  const host = hosts[market] || hosts.fr;
+  const host = BM_HOSTS[market] || BM_HOSTS.fr;
   const lang = `${market}-${market}`;
   try {
     const r = await fetchWithTimeout(`${host}/ws/listings`, {
-      headers: {
-        Authorization: `Basic ${BM_KEY}`,
-        Accept: "application/json",
-        "Accept-Language": lang,
-      },
+      headers: { Authorization: `Basic ${BM_KEY}`, Accept: "application/json", "Accept-Language": lang },
     }, 25000);
     const data = await r.json();
     res.json({ market: market.toUpperCase(), data: data });
@@ -307,37 +428,27 @@ app.get("/api/backmarket/listings", async (req, res) => {
 app.get("/api/backmarket/all", async (req, res) => {
   if (!BM_KEY) return res.status(400).json({ error: "BM key not configured" });
   const markets = ["it", "fr", "de", "es", "nl"];
-  const hosts = {
-    fr: "https://www.backmarket.fr",
-    de: "https://www.backmarket.de",
-    it: "https://www.backmarket.it",
-    es: "https://www.backmarket.es",
-    nl: "https://www.backmarket.nl",
-  };
   try {
-    const results = await Promise.all(markets.map(async function (m) {
+    const out = {};
+    await Promise.all(markets.map(async function (m) {
       try {
-        const r = await fetchWithTimeout(`${hosts[m]}/ws/listings`, {
-          headers: {
-            Authorization: `Basic ${BM_KEY}`,
-            Accept: "application/json",
-            "Accept-Language": `${m}-${m}`,
-          },
+        const r = await fetchWithTimeout(`${BM_HOSTS[m]}/ws/listings`, {
+          headers: { Authorization: `Basic ${BM_KEY}`, Accept: "application/json", "Accept-Language": `${m}-${m}` },
         }, 25000);
         const data = await r.json();
-        return { market: m.toUpperCase(), ok: true, data: data };
+        out[m] = { data: data };
       } catch (err) {
-        return { market: m.toUpperCase(), ok: false, error: err.message };
+        out[m] = { error: err.message };
       }
     }));
-    res.json({ results: results });
+    res.json(out);
   } catch (e) {
     res.status(500).json({ error: `BM all error: ${e.message}` });
   }
 });
 
 // =============================================================
-// BULK PRICE
+// BULK PRICE (legacy)
 // =============================================================
 app.post("/api/bulk-price", async (req, res) => {
   const items = req.body && req.body.items;
@@ -348,18 +459,9 @@ app.post("/api/bulk-price", async (req, res) => {
     const batch = items.slice(i, i + batchSize);
     const batchRes = await Promise.all(batch.map(async function (it) {
       try {
-        const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${it.domain}&asin=${it.asin}&offers=20&stats=30`;
-        const r = await fetchWithTimeout(url);
-        const json = await r.json();
+        const json = await callKeepa(it.asin, it.domain, true);
         const p = json && json.products && json.products[0];
-        return {
-          asin: it.asin,
-          domain: it.domain,
-          title: (p && p.title) || null,
-          monthlySold: (p && p.monthlySold) || null,
-          offers: (p && p.offers) || [],
-          ok: true,
-        };
+        return { asin: it.asin, domain: it.domain, title: (p && p.title) || null, monthlySold: (p && p.monthlySold) || null, offers: (p && p.offers) || [], ok: true };
       } catch (err) {
         return { asin: it.asin, domain: it.domain, ok: false, error: err.message };
       }
@@ -375,18 +477,15 @@ app.post("/api/bulk-price", async (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
-    env: {
-      keepa: !!KEEPA_KEY,
-      serpapi: !!SERPAPI_KEY,
-      backmarket: !!BM_KEY,
-      ninja: !!NINJA_KEY,
-    },
+    env: { keepa: !!KEEPA_KEY, serpapi: !!SERPAPI_KEY, backmarket: !!BM_KEY, ninja: !!NINJA_KEY },
     endpoints: [
       "GET /api/health",
       "GET /api/keepa?asin=&domain=",
       "GET /api/keepa-offers?asin=&domain=",
       "GET /api/serpapi?asin=&domain=",
       "GET /api/ninja?asin=&domain=",
+      "GET /api/scan-asin?asin=&domain=",
+      "POST /api/bulk-scan",
       "GET /api/scan-asin-deep?asin=&domain=",
       "GET /api/backmarket/listings?market=FR",
       "GET /api/backmarket/all",
