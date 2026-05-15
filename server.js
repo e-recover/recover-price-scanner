@@ -160,22 +160,44 @@ app.get("/api/ninja", async (req, res) => {
 // EXTRACT SerpApi purchase_options — supporta percorsi multipli
 // =============================================================
 function extractSerpapiPurchaseOptions(serpapiData) {
-  // SerpApi può mettere purchase_options alla root o dentro product_results
+  // SerpApi mette purchase_options alla root del JSON
   const po = (serpapiData && serpapiData.purchase_options)
           || (serpapiData && serpapiData.product_results && serpapiData.product_results.purchase_options)
           || {};
   const out = {};
   const keys = ["refurbished_premium", "refurbished_excellent", "refurbished_good", "refurbished_acceptable"];
+
   for (const key of keys) {
-    const arr = po[key];
-    if (Array.isArray(arr) && arr.length > 0) {
-      const first = arr[0];
-      const priceNum = (typeof first.extracted_price === "number")
-        ? first.extracted_price
-        : parsePrice(first.price);
+    const item = po[key];
+    // L'item può essere oggetto singolo (caso reale verificato) o array (legacy)
+    let entry = null;
+    if (Array.isArray(item) && item.length > 0) {
+      entry = item[0];
+    } else if (item && typeof item === "object") {
+      entry = item;
+    }
+
+    if (entry) {
+      const priceNum = (typeof entry.extracted_price === "number")
+        ? entry.extracted_price
+        : parsePrice(entry.price);
+
+      // Seller: priorità a shipper_seller (3rd party), poi sold_by (FBA), poi dispatches_from
+      let seller = null;
+      const f = entry.features || {};
+      if (f.shipper_seller && f.shipper_seller.text) {
+        seller = f.shipper_seller.text;
+      } else if (f.sold_by && f.sold_by.text) {
+        seller = f.sold_by.text;
+      } else if (f.dispatches_from && f.dispatches_from.text) {
+        seller = f.dispatches_from.text;
+      } else if (entry.seller || entry.seller_name || entry.merchant) {
+        seller = entry.seller || entry.seller_name || entry.merchant;
+      }
+
       out[key] = {
         price: priceNum,
-        seller: first.seller || first.seller_name || first.merchant || null,
+        seller: seller,
         available: !!priceNum,
       };
     } else {
