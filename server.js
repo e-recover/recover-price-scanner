@@ -242,6 +242,7 @@ app.get("/api/scan-asin", async (req, res) => {
   let acceptableMinReal = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
   // Featured da Ninja buy_boxes (variabile dedicata per evitare race con SerpApi)
   let ninjaFeaturedExcellent = null;
+  let _ninjaBuyBoxesDebug = null; // DEBUG temporaneo
   let recoverPosition   = { inList: false, rank: null, condition: null, price: null };
 
   const promises = [];
@@ -349,6 +350,12 @@ app.get("/api/scan-asin", async (req, res) => {
 
         // FEATURED EXCELLENT da buy_boxes Ninja (popola variabile dedicata, no overwrite)
         const buyBoxes = Array.isArray(d.buy_boxes) ? d.buy_boxes : [];
+        // DEBUG temporaneo: esporre i titoli classificati
+        _ninjaBuyBoxesDebug = buyBoxes.map(b => ({
+          title: b.title,
+          price: b.price,
+          classified: classifyCondition(b.title),
+        }));
         const bbExcellent = buyBoxes.find(b => classifyCondition(b.title) === "excellent");
         if (bbExcellent && bbExcellent.price) {
           const bbPrice = parsePrice(bbExcellent.price);
@@ -407,6 +414,10 @@ app.get("/api/scan-asin", async (req, res) => {
     keepaOk: keepaOk,
     serpapiOk: serpapiOk,
     ninjaOk: ninjaOk,
+    _debug: {
+      ninjaBuyBoxes: _ninjaBuyBoxesDebug,
+      ninjaFeaturedExcellent: ninjaFeaturedExcellent,
+    },
   });
 });
 
