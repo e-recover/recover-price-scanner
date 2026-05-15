@@ -278,7 +278,7 @@ app.get("/api/scan-asin", async (req, res) => {
     );
   }
 
-  // Ninja (MIN reale + posizione Recover)
+  // Ninja (MIN reale + Featured Excellent da buy_boxes + posizione Recover)
   if (NINJA_KEY) {
     promises.push(
       callNinja(asin, domain).then(raw => {
@@ -309,16 +309,11 @@ app.get("/api/scan-asin", async (req, res) => {
           if (list.length === 0) {
             return { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
           }
-          // MIN reale = ordinato per totalPrice
           const byTotal = [...list].sort((a, b) => a.totalPrice - b.totalPrice);
           const minByTotal = byTotal[0];
-          // MIN apparente = ordinato per prezzo nominale
           const byPrice = [...list].sort((a, b) => a.price - b.price);
           const minByPrice = byPrice[0];
 
-          // Segnalo l'apparente solo se:
-          //  (1) è un seller diverso dal MIN totale
-          //  (2) il prezzo nominale è veramente più basso del totale MIN (sembra una offerta migliore)
           let apparent = null;
           if (minByPrice.sellerId !== minByTotal.sellerId && minByPrice.price < minByTotal.totalPrice) {
             apparent = {
@@ -349,6 +344,25 @@ app.get("/api/scan-asin", async (req, res) => {
         excellentMinReal  = buildMin("excellent");
         goodMinReal       = buildMin("good");
         acceptableMinReal = buildMin("acceptable");
+
+        // FEATURED EXCELLENT da buy_boxes Ninja (più affidabile di SerpApi)
+        const buyBoxes = Array.isArray(d.buy_boxes) ? d.buy_boxes : [];
+        const bbExcellent = buyBoxes.find(b => classifyCondition(b.title) === "excellent");
+        if (bbExcellent && bbExcellent.price) {
+          const bbPrice = parsePrice(bbExcellent.price);
+          // Trovo il seller della prima offerta Excellent che ha quel prezzo
+          let bbSeller = null;
+          const match = enriched.filter(o => o.condition === "excellent" && Math.abs(o.price - bbPrice) < 0.5);
+          if (match.length > 0) bbSeller = match[0].seller;
+          // Sovrascrivo solo se Ninja ha trovato qualcosa (priorità Ninja)
+          if (bbPrice) {
+            excellent = {
+              price: bbPrice,
+              seller: bbSeller || (excellent.seller || null),
+              available: true,
+            };
+          }
+        }
 
         const myOffer = enriched.find(o => o.sellerId === RECOVER_SELLER_ID);
         if (myOffer) {
