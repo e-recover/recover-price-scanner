@@ -62,8 +62,8 @@ function classifyCondition(raw) {
   if (!raw) return "unknown";
   const s = String(raw).toLowerCase();
   if (s.includes("premium") || s.includes("like new") || s.includes("come nuovo") || s.includes("comme neuf") || s.includes("como nuevo") || s.includes("wie neu")) return "premium";
-  if (s.includes("excellent") || s.includes("eccellente") || s.includes("excelente") || s.includes("sehr gut") || s.includes("ausgezeichnet")) return "excellent";
-  if (s.includes("very good") || s.includes("molto buono") || s.includes("très bon") || s.includes("muy bueno")) return "very_good";
+  if (s.includes("excellent") || s.includes("eccellente") || s.includes("excelente") || s.includes("hervorragend") || s.includes("ausgezeichnet")) return "excellent";
+  if (s.includes("very good") || s.includes("molto buono") || s.includes("très bon") || s.includes("muy bueno") || s.includes("sehr gut")) return "very_good";
   if (s.includes("acceptable") || s.includes("accettabile") || s.includes("aceptable") || s.includes("akzeptabel") || s.includes("correct")) return "acceptable";
   if (s.includes("good") || s.includes("buono") || s.includes("bueno") || s.includes(" gut") || s.includes("- gut") || s.includes("bon")) return "good";
   return "unknown";
