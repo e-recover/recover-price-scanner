@@ -1,13 +1,14 @@
 {
-  "name": "recover-price-scanner",
-  "version": "1.0.0",
-  "description": "Recover Srl - Amazon EU Price Scanner powered by Keepa",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "node-fetch": "^2.7.0"
-  }
+    "name": "recover-price-scanner",
+    "version": "1.0.0",
+    "description": "Recover Srl - Amazon EU Price Scanner powered by Keepa",
+    "main": "server.js",
+    "scripts": {
+          "start": "node server.js"
+    },
+    "dependencies": {
+          "express": "^4.18.2",
+          "express-basic-auth": "^1.2.1",
+          "node-fetch": "^2.7.0"
+    }
 }
