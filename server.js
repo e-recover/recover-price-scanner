@@ -12,8 +12,9 @@ const basicAuth = require("express-basic-auth");
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
-app.use(express.static("public"));
 app.use(basicAuth({ users: { [process.env.BASIC_AUTH_USER || 'recover']: process.env.BASIC_AUTH_PASS || '' }, challenge: true, realm: 'Recover Price Scanner' }));
+app.use(express.static("public"));
+
 
 const PORT = process.env.PORT || 3000;
 
