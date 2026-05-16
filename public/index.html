@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -855,13 +856,10 @@ async function doSearch() {
         document.getElementById("product-title").textContent = title;
       }
 
-      const monthly = data.monthlySold;
       const bsr = data.salesRank;
       let monthlyStr;
-      if (monthly !== null && monthly !== undefined) {
-        monthlyStr = `<span class="price-val">${monthly}</span><div class="seller-line">unità/mese</div>`;
-      } else if (bsr !== null && bsr !== undefined && bsr > 0) {
-        // Fallback BSR: mostra rank e classifica come proxy di popolarità
+      if (bsr !== null && bsr !== undefined && bsr > 0) {
+        // Mostra sempre il BSR (Best Seller Rank) come indicatore di popolarità uniforme
         const bsrColor = bsr <= 10 ? '#48bb78' : bsr <= 50 ? '#f59e0b' : '#8890aa';
         monthlyStr = `<span style="font-size:13px;font-weight:700;color:${bsrColor};">BSR #${bsr.toLocaleString('it-IT')}</span><div class="seller-line">in Renewed</div>`;
       } else {
