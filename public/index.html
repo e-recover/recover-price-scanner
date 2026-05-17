@@ -1,804 +1,1195 @@
-// =============================================================
-// RECOVER PRICE SCANNER — server.js (CommonJS)
-// Endpoint:
-//   /api/health, /api/keepa, /api/keepa-offers, /api/serpapi,
-//   /api/ninja, /api/scan-asin, /api/bulk-scan, /api/scan-asin-deep,
-//   /api/backmarket/listings, /api/backmarket/all, /api/bulk-price
-// =============================================================
 
-const express = require("express");
-const fetch = require("node-fetch");
-const basicAuth = require("express-basic-auth");
-
-const app = express();
-app.use(express.json({ limit: "2mb" }));
-app.use(basicAuth({ users: { [process.env.BASIC_AUTH_USER || 'recover']: process.env.BASIC_AUTH_PASS || '' }, challenge: true, realm: 'Recover Price Scanner' }));
-app.use(express.static("public"));
-
-
-const PORT = process.env.PORT || 3000;
-
-// ENV
-const KEEPA_KEY    = process.env.KEEPA_API_KEY    || "";
-const SERPAPI_KEY  = process.env.SERPAPI_KEY      || "";
-const BM_KEY       = process.env.BM_API_KEY || process.env.BM_KEY || "";
-const NINJA_KEY    = process.env.NINJA_KEY        || "";
-
-const RECOVER_SELLER_ID = "A2L7F1YZ0EWD52";
-
-// =============================================================
-// MAPPING DOMINI — Keepa: 8=IT, 3=DE, 4=FR, 9=ES
-// =============================================================
-const NINJA_COUNTRY  = { 8: "IT", 3: "DE", 4: "FR", 9: "ES" };
-const SERPAPI_DOMAIN = { 8: "amazon.it", 3: "amazon.de", 4: "amazon.fr", 9: "amazon.es" };
-const MARKET_CODE    = { 8: "IT", 3: "DE", 4: "FR", 9: "ES" };
-
-// =============================================================
-// HELPER — parsing
-// =============================================================
-// FIX parsePrice: gestisce formato EU "1.234,56" e EN "1,234.56"
-// senza troncare i decimali (bug vecchio: .replace(",",".") singola occorrenza)
-function parsePrice(s) {
-  if (s === null || s === undefined) return null;
-  if (typeof s === "number") return s;
-  let str = String(s).replace(/[^\d,.-]/g, "");
-  if (!str) return null;
-
-  const lastComma = str.lastIndexOf(",");
-  const lastDot   = str.lastIndexOf(".");
-
-  if (lastComma > -1 && lastDot > -1) {
-    if (lastComma > lastDot) {
-      // Formato EU "1.234,56" → punti = migliaia, virgola = decimale
-      str = str.replace(/\./g, "").replace(",", ".");
-    } else {
-      // Formato EN "1,234.56" → virgole = migliaia, punto = decimale
-      str = str.replace(/,/g, "");
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recover — Price Scanner</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
+      --border: #2e3350; --accent: #4f8ef7; --accent-hover: #6da3ff;
+      --text: #e8eaf0; --muted: #8890aa; --danger: #f56565;
+      --success: #48bb78; --warn: #ed8936; --radius: 10px;
     }
-  } else if (lastComma > -1) {
-    // Solo virgola = separatore decimale ("559,99")
-    str = str.replace(/\./g, "").replace(",", ".");
-  }
-  // Solo punto o nessun separatore: già corretto
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem 1rem; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 2rem; }
+    header .brand { font-size: 9px; letter-spacing: 6px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+    header h1 { font-size: 2rem; font-weight: 700; color: var(--text); }
+    header p { margin-top: 0.5rem; color: var(--muted); font-size: 0.9rem; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; margin-bottom: 1.25rem; }
+    .card-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 1rem; }
+    .selector-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; }
+    label.field { display: flex; flex-direction: column; gap: 0.35rem; }
+    label.field span { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    select, input { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.95rem; padding: 0.6rem 0.85rem; outline: none; transition: border-color 0.2s; width: 100%; }
+    select:focus, input:focus { border-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+    input.mono { font-family: "Courier New", monospace; letter-spacing: 1px; font-size: 1rem; }
+    input.asin-found { border-color: var(--success); }
+    input.asin-missing { border-color: var(--warn); }
+    .asin-status { font-size: 0.75rem; margin-top: 0.25rem; }
+    .asin-status.found { color: var(--success); }
+    .asin-status.missing { color: var(--warn); }
+    .search-row { display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap; margin-top: 1rem; }
+    button.btn { background: var(--accent); border: none; border-radius: 8px; color: #fff; cursor: pointer; font-size: 0.95rem; font-weight: 600; padding: 0.65rem 2rem; transition: background 0.2s; white-space: nowrap; }
+    button.btn:hover { background: var(--accent-hover); }
+    button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .spinner { display: none; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #result { display: none; }
+    .product-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .product-header { display: flex; gap: 1.25rem; padding: 1.5rem; border-bottom: 1px solid var(--border); align-items: flex-start; }
+    .product-image { width: 90px; height: 90px; object-fit: contain; border-radius: 8px; background: var(--surface2); flex-shrink: 0; }
+    .product-placeholder { width: 90px; height: 90px; background: var(--surface2); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 2rem; flex-shrink: 0; }
+    .product-meta h2 { font-size: 1.05rem; font-weight: 600; line-height: 1.4; margin-bottom: 0.5rem; }
+    .asin-badge { display: inline-block; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--muted); font-family: "Courier New", monospace; font-size: 0.78rem; padding: 0.2rem 0.5rem; margin-right: 0.4rem; }
+    .markets-table-wrap { overflow-x: auto; }
+    table.markets-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    table.markets-table thead tr { border-bottom: 2px solid var(--border); }
+    table.markets-table th { padding: 0.75rem 0.85rem; text-align: left; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); white-space: nowrap; }
+    table.markets-table td { padding: 0.85rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    table.markets-table tbody tr:last-child td { border-bottom: none; }
+    table.markets-table tbody tr:hover { background: var(--surface2); }
+    .market-cell { display: flex; align-items: center; gap: 0.55rem; font-weight: 600; white-space: nowrap; font-size: 0.85rem; }
+    .market-flag { font-size: 1.2rem; }
+    .price-val { font-size: 1rem; font-weight: 700; }
+    .price-val.highlight { color: var(--success); }
+    .price-val.na { color: var(--muted); font-size: 0.82rem; font-weight: 400; }
+    .seller-line { font-size: 0.7rem; color: var(--muted); margin-top: 3px; font-weight: 400; }
+    .best-badge { display: inline-block; background: rgba(72,187,120,0.15); border: 1px solid rgba(72,187,120,0.3); border-radius: 4px; color: var(--success); font-size: 0.6rem; font-weight: 700; padding: 1px 5px; margin-left: 5px; text-transform: uppercase; vertical-align: middle; }
+    .opp-badge { display: inline-block; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.35); border-radius: 4px; color: #f59e0b; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; text-transform: uppercase; }
+    .view-link { color: var(--accent); text-decoration: none; font-size: 0.82rem; white-space: nowrap; }
+    .view-link:hover { color: var(--accent-hover); }
+    .scanning-cell { color: var(--muted); font-size: 0.82rem; animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .mkt-checkbox-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .mkt-checkbox-row > span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+    .mkt-checkbox-row label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; user-select: none; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
+    .mkt-checkbox-row label input { width: auto; padding: 0; margin: 0; accent-color: var(--accent); }
+    .token-info { padding: 0.75rem 1rem; border-top: 1px solid var(--border); font-size: 0.78rem; color: var(--muted); text-align: right; }
+    /* nuovi stili per Featured + MIN reale */
+    .price-block { display: flex; flex-direction: column; gap: 4px; }
+    .price-line { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+    .price-tag { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; padding: 1px 5px; border-radius: 3px; background: var(--surface2); }
+    .price-tag.featured { color: #4f8ef7; background: rgba(79,142,247,0.12); }
+    .price-tag.min { color: var(--warn); background: rgba(237,137,54,0.15); }
+    .feedback-badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; margin-left: 4px; }
+    .feedback-badge.good { background: rgba(72,187,120,0.15); color: var(--success); }
+    .feedback-badge.mid { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .feedback-badge.bad { background: rgba(245,101,101,0.15); color: var(--danger); }
+    .price-divider { height: 1px; background: var(--border); margin: 4px 0; }
+    .recover-line { font-size: 10px; color: var(--accent); margin-top: 4px; font-weight: 600; }
+    @media (max-width: 700px) {
+      .selector-grid { grid-template-columns: 1fr 1fr; }
+      .product-header { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="brand">Recover Srl — Padova · Vicenza</div>
+    <h1>📱 Price Scanner</h1>
+    <p>Prezzi Amazon · Back Market · IT · DE · FR · ES · NL</p>
+  </header>
 
-  const n = parseFloat(str);
-  return isNaN(n) ? null : Math.round(n * 100) / 100;
-}
+  <div style="display:flex;gap:8px;margin-bottom:16px;">
+    <button onclick="showMainTab('amazon')" id="tab-amazon" style="padding:8px 18px;border-radius:8px;border:1px solid #4f8ef7;background:rgba(79,142,247,0.15);color:#4f8ef7;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">🛒 Amazon</button>
+    <button onclick="showMainTab('backmarket')" id="tab-bm" style="padding:8px 18px;border-radius:8px;border:1px solid #2e3350;background:transparent;color:#8890aa;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">🔄 Back Market</button>
+    <button onclick="showMainTab('report')" id="tab-report" style="padding:8px 18px;border-radius:8px;border:1px solid #2e3350;background:transparent;color:#8890aa;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">📊 Report Fornitore</button>
+  </div>
 
-// FIX: valida formato ASIN Amazon (10 caratteri alfanumerici maiuscoli)
-function isValidAsin(asin) {
-  return typeof asin === "string" && /^[A-Z0-9]{10}$/.test(asin.trim().toUpperCase());
-}
+  <div id="amazon-section">
+    <div class="card">
+      <div class="card-title">① Seleziona modello</div>
+      <div class="selector-grid">
+        <label class="field"><span>Serie</span>
+          <select id="sel-series" onchange="updateModels()">
+            <option value="">— Serie —</option>
+            <option>SE</option><option>12</option><option>13</option>
+            <option>14</option><option>15</option><option>16</option>
+          </select>
+        </label>
+        <label class="field"><span>Modello</span>
+          <select id="sel-model" onchange="updateStorage()" disabled><option value="">— Modello —</option></select>
+        </label>
+        <label class="field"><span>Storage</span>
+          <select id="sel-storage" onchange="updateColors()" disabled><option value="">— Storage —</option></select>
+        </label>
+        <label class="field"><span>Colore</span>
+          <select id="sel-color" onchange="updateASINs()" disabled><option value="">— Colore —</option></select>
+        </label>
+      </div>
+      <div class="search-row">
+        <label class="field" style="flex:1;min-width:200px">
+          <span>ASIN (oppure inserisci manualmente)</span>
+          <input id="asin-input" class="mono" type="text" placeholder="es. B09MJSL8MR" maxlength="10" autocomplete="off" spellcheck="false" oninput="this.value=this.value.toUpperCase()" />
+          <div class="asin-status" id="asin-status"></div>
+        </label>
+        <label class="field" style="min-width:130px">
+          <span>Prezzo acquisto (€)</span>
+          <input id="buy-price" type="number" min="0" placeholder="es. 300" style="font-family:inherit;" />
+        </label>
+        <button class="btn" id="search-btn" onclick="doSearch()">
+          <span id="btn-label">Cerca su tutti i mercati</span>
+          <div class="spinner" id="spinner"></div>
+        </button>
+      </div>
+    </div>
+    <div id="result"></div>
+  </div>
 
-function parseSellerRating(s) {
-  if (!s) return null;
-  const n = parseFloat(String(s).replace(",", "."));
-  return isNaN(n) ? null : n;
-}
-function parsePositivePercent(info) {
-  if (!info) return null;
-  const m = String(info).match(/(\d{1,3})\s*%/);
-  return m ? parseInt(m[1], 10) : null;
-}
+  <div id="bm-section" style="display:none;">
+    <div class="card">
+      <div class="card-title">Back Market — Prezzi BuyBox per paese</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+        <input id="bm-search" placeholder="Cerca per modello o SKU..." oninput="filterBM()" style="flex:1;min-width:200px;background:#0f1117;border:1px solid #2e3350;border-radius:8px;color:#e8eaf0;font-size:12px;padding:8px 12px;font-family:inherit;outline:none;" />
+        <button onclick="loadBMData()" id="bm-load-btn" style="padding:8px 18px;border-radius:8px;border:1px solid rgba(72,187,120,0.4);background:rgba(72,187,120,0.1);color:#48bb78;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;">⟳ Carica dati</button>
+      </div>
+      <div id="bm-status" style="font-size:11px;color:#8890aa;margin-bottom:8px;"></div>
+    </div>
+    <div id="bm-table-wrap"></div>
+  </div>
 
-function parseDeliveryFee(s) {
-  if (!s) return 0;
-  const lower = String(s).toLowerCase().trim();
-  // Gratis / Free in IT, DE, FR, ES, EN
-  if (lower === "" || lower.includes("gratis") || lower.includes("free") || lower.includes("gratuit") || lower.includes("gratuito") || lower.includes("kostenlos") || lower.includes("frei")) return 0;
-  // Estrai numero (es. "por 9,99 €" → 9.99, "4,99 €" → 4.99)
-  const m = lower.match(/(\d+[.,]\d+|\d+)/);
-  if (m) {
-    const n = parsePrice(m[1]);
-    return (n !== null && n > 0) ? n : 0;
-  }
-  return 0;
-}
-function parseMonthlySoldFromText(s) {
-  if (!s) return null;
-  const m = String(s).match(/(\d{1,5})/);
-  return m ? parseInt(m[1], 10) : null;
-}
-function classifyCondition(raw) {
-  if (!raw) return "unknown";
-  const s = String(raw).toLowerCase();
-  if (s.includes("premium") || s.includes("like new") || s.includes("come nuovo") || s.includes("comme neuf") || s.includes("como nuevo") || s.includes("wie neu")) return "premium";
-  if (s.includes("excellent") || s.includes("eccellente") || s.includes("excelente") || s.includes("hervorragend") || s.includes("ausgezeichnet")) return "excellent";
-  if (s.includes("very good") || s.includes("molto buono") || s.includes("très bon") || s.includes("muy bueno") || s.includes("sehr gut")) return "very_good";
-  if (s.includes("acceptable") || s.includes("accettabile") || s.includes("aceptable") || s.includes("akzeptabel") || s.includes("correct")) return "acceptable";
-  if (s.includes("good") || s.includes("buono") || s.includes("bueno") || s.includes(" gut") || s.includes("- gut") || s.includes("bon")) return "good";
-  return "unknown";
-}
-function priceFromOffer(o) {
-  if (!o) return null;
-  const raw = (o.product_price !== undefined && o.product_price !== null) ? o.product_price : o.price;
-  return parsePrice(raw);
-}
+  <div id="report-section" style="display:none;">
+    <div class="card">
+      <div class="card-title">📊 Report Margine — Fornitore NL (13/05/2026)</div>
+      <div class="mkt-checkbox-row">
+        <span>Mercati:</span>
+        <label><input type="checkbox" id="mkt-IT" checked onchange="updateEstimate()" /> 🇮🇹 IT</label>
+        <label><input type="checkbox" id="mkt-DE" onchange="updateEstimate()" /> 🇩🇪 DE</label>
+        <label><input type="checkbox" id="mkt-FR" onchange="updateEstimate()" /> 🇫🇷 FR</label>
+        <label><input type="checkbox" id="mkt-ES" onchange="updateEstimate()" /> 🇪🇸 ES</label>
+        <span id="report-estimate" style="font-size:10px;color:#f59e0b;margin-left:8px;"></span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+        <input id="report-search" placeholder="Cerca modello..." oninput="filterReport()" style="flex:1;min-width:200px;background:#0f1117;border:1px solid #2e3350;border-radius:8px;color:#e8eaf0;font-size:12px;padding:8px 12px;font-family:inherit;outline:none;" />
+        <button onclick="runReport()" id="report-btn" style="padding:8px 18px;border-radius:8px;border:1px solid rgba(245,158,11,0.4);background:rgba(245,158,11,0.1);color:#f59e0b;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;">▶ Avvia scansione prezzi</button>
+      </div>
+      <div id="report-status" style="font-size:11px;color:#8890aa;margin-bottom:8px;"></div>
+    </div>
+    <div id="report-table-wrap"></div>
+  </div>
+</div>
 
-async function fetchWithTimeout(url, opts, timeoutMs) {
-  opts = opts || {};
-  timeoutMs = timeoutMs || 20000;
-  const ctrl = new AbortController();
-  const t = setTimeout(function () { ctrl.abort(); }, timeoutMs);
-  try {
-    return await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-// =============================================================
-// KEEPA
-// =============================================================
-async function callKeepa(asin, domain, offers) {
-  const offersParam = offers ? `&offers=20` : "";
-  const url = `https://api.keepa.com/product?key=${KEEPA_KEY}&domain=${domain}&asin=${asin}${offersParam}&stats=30`;
-  const r = await fetchWithTimeout(url, {}, 25000);
-  if (!r.ok) throw new Error(`Keepa status ${r.status}`);
-  return await r.json();
-}
-
-app.get("/api/keepa", async (req, res) => {
-  if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY not configured" });
-  const asin = req.query.asin, domain = req.query.domain || 8;
-  if (!asin) return res.status(400).json({ error: "asin required" });
-  try { res.json(await callKeepa(asin, domain, false)); }
-  catch (e) { res.status(500).json({ error: `Keepa error: ${e.message}` }); }
-});
-
-app.get("/api/keepa-offers", async (req, res) => {
-  if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY not configured" });
-  const asin = req.query.asin, domain = req.query.domain || 8;
-  if (!asin) return res.status(400).json({ error: "asin required" });
-  try { res.json(await callKeepa(asin, domain, true)); }
-  catch (e) { res.status(500).json({ error: `Keepa-offers error: ${e.message}` }); }
-});
-
-// =============================================================
-// SERPAPI
-// =============================================================
-async function callSerpapi(asin, domain) {
-  const amazon_domain = SERPAPI_DOMAIN[domain] || "amazon.it";
-  const url = `https://serpapi.com/search.json?engine=amazon_product&amazon_domain=${amazon_domain}&asin=${asin}&api_key=${SERPAPI_KEY}`;
-  const r = await fetchWithTimeout(url, {}, 25000);
-  if (!r.ok) throw new Error(`SerpApi status ${r.status}`);
-  return await r.json();
-}
-
-app.get("/api/serpapi", async (req, res) => {
-  if (!SERPAPI_KEY) return res.status(400).json({ error: "SERPAPI_KEY not configured" });
-  const asin = req.query.asin, domain = req.query.domain || 8;
-  if (!asin) return res.status(400).json({ error: "asin required" });
-  try { res.json(await callSerpapi(asin, domain)); }
-  catch (e) { res.status(500).json({ error: `SerpApi error: ${e.message}` }); }
-});
-
-// =============================================================
-// NINJA / RapidAPI
-// =============================================================
-async function callNinja(asin, domain) {
-  const country = NINJA_COUNTRY[domain] || "IT";
-  const url = `https://real-time-amazon-data.p.rapidapi.com/product-offers?asin=${asin}&country=${country}&limit=20&page=1`;
-  const r = await fetchWithTimeout(url, {
-    headers: {
-      "x-rapidapi-key": NINJA_KEY,
-      "x-rapidapi-host": "real-time-amazon-data.p.rapidapi.com",
-    },
+<script>
+function showMainTab(tab) {
+  document.getElementById('amazon-section').style.display = tab==='amazon' ? 'block' : 'none';
+  document.getElementById('bm-section').style.display = tab==='backmarket' ? 'block' : 'none';
+  document.getElementById('report-section').style.display = tab==='report' ? 'block' : 'none';
+  ['amazon','bm','report'].forEach(t => {
+    const id = t==='amazon' ? 'tab-amazon' : t==='bm' ? 'tab-bm' : 'tab-report';
+    const active = (t==='amazon'&&tab==='amazon')||(t==='bm'&&tab==='backmarket')||(t==='report'&&tab==='report');
+    const el = document.getElementById(id);
+    el.style.borderColor = active ? '#4f8ef7' : '#2e3350';
+    el.style.background = active ? 'rgba(79,142,247,0.15)' : 'transparent';
+    el.style.color = active ? '#4f8ef7' : '#8890aa';
   });
-  if (!r.ok) throw new Error(`Ninja status ${r.status}`);
-  return await r.json();
 }
 
-app.get("/api/ninja", async (req, res) => {
-  if (!NINJA_KEY) return res.status(400).json({ error: "Ninja/RapidAPI key not configured" });
-  const asin = req.query.asin, domain = req.query.domain || 8;
-  if (!asin) return res.status(400).json({ error: "asin required" });
-  try { res.json(await callNinja(asin, parseInt(domain, 10))); }
-  catch (e) { res.status(500).json({ error: `Ninja error: ${e.message}` }); }
-});
+// ─── BACK MARKET (invariato) ─────────────────────────────────────────────────
+let bmData = null;
+const BM_FLAGS = {it:'🇮🇹',fr:'🇫🇷',de:'🇩🇪',es:'🇪🇸',nl:'🇳🇱'};
+const BM_COUNTRIES = ['it','fr','de','es','nl'];
+const GRADE_LABELS = {EXCELLENT:'Eccellente',VERY_GOOD:'Molto buono',GOOD:'Buono'};
 
-// =============================================================
-// EXTRACT SerpApi purchase_options — supporta percorsi multipli
-// =============================================================
-function extractSerpapiPurchaseOptions(serpapiData) {
-  // SerpApi mette purchase_options alla root del JSON
-  const po = (serpapiData && serpapiData.purchase_options)
-          || (serpapiData && serpapiData.product_results && serpapiData.product_results.purchase_options)
-          || {};
-  const out = {};
-  const keys = ["refurbished_premium", "refurbished_excellent", "refurbished_good", "refurbished_acceptable"];
-
-  for (const key of keys) {
-    const item = po[key];
-    // L'item può essere oggetto singolo (caso reale verificato) o array (legacy)
-    let entry = null;
-    if (Array.isArray(item) && item.length > 0) {
-      entry = item[0];
-    } else if (item && typeof item === "object") {
-      entry = item;
-    }
-
-    if (entry) {
-      const priceNum = (typeof entry.extracted_price === "number")
-        ? entry.extracted_price
-        : parsePrice(entry.price);
-
-      // Seller: priorità a shipper_seller (3rd party), poi sold_by (FBA), poi dispatches_from
-      let seller = null;
-      const f = entry.features || {};
-      if (f.shipper_seller && f.shipper_seller.text) {
-        seller = f.shipper_seller.text;
-      } else if (f.sold_by && f.sold_by.text) {
-        seller = f.sold_by.text;
-      } else if (f.dispatches_from && f.dispatches_from.text) {
-        seller = f.dispatches_from.text;
-      } else if (entry.seller || entry.seller_name || entry.merchant) {
-        seller = entry.seller || entry.seller_name || entry.merchant;
-      }
-
-      out[key] = {
-        price: priceNum,
-        seller: seller,
-        available: !!priceNum,
-      };
-    } else {
-      out[key] = { price: null, seller: null, available: false };
-    }
-  }
-  return out;
-}
-
-// =============================================================
-// SCAN-ASIN — Keepa + SerpApi (formato per index.html)
-// =============================================================
-app.get("/api/scan-asin", async (req, res) => {
-  const asin = req.query.asin;
-  const domain = parseInt(req.query.domain || 8, 10);
-  if (!asin) return res.status(400).json({ error: "asin required" });
-  // FIX: validazione formato ASIN prima di chiamare le API a pagamento
-  if (!isValidAsin(asin)) return res.status(400).json({ error: "ASIN non valido — deve essere 10 caratteri alfanumerici (es. B0CVJ2RLP5)" });
-
-  let keepaOk = false, serpapiOk = false, ninjaOk = false;
-  let title = null, monthlySold = null, amazonBuyBox = null, salesRank = null;
-  // Featured (SerpApi) — Buy Box ufficiale per condition
-  let excellent  = { price: null, seller: null, available: false };
-  let good       = { price: null, seller: null, available: false };
-  let acceptable = { price: null, seller: null, available: false };
-  let premium    = { price: null, seller: null, available: false };
-  // MIN reale (Ninja) — più basso TOTALE (prezzo + spedizione) tra tutte le offerte di quella condition
-  let excellentMinReal  = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
-  let goodMinReal       = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
-  let acceptableMinReal = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
-  // Featured da Ninja product_offers[0 Excellent] (variabile dedicata per evitare race con SerpApi)
-  let ninjaFeaturedExcellent = null;
-  let recoverPosition   = { inList: false, rank: null, condition: null, price: null, isLowest: false, tiedLowest: false, tiedSeller: null, nextPrice: null, nextSeller: null, nextFeedback: null, ceilingPrice: null, priceGain: null };
-
-  const promises = [];
-
-  // Keepa
-  promises.push(
-    callKeepa(asin, domain, false).then(json => {
-      const p = json && json.products && json.products[0];
-      if (p) {
-        keepaOk = true;
-        title = p.title || null;
-        if (typeof p.monthlySold === "number") monthlySold = p.monthlySold;
-        const csv = p.csv || [];
-        if (Array.isArray(csv[1]) && csv[1].length >= 2) {
-          const last = csv[1][csv[1].length - 1];
-          if (typeof last === "number" && last > 0) amazonBuyBox = last;
-        }
-        // FIX BSR: leggo il rank della SOTTOCATEGORIA "Renewed",
-        // non csv[3] (= categoria root Elettronica, valori inutili tipo #6756).
-        // salesRanks è { catId: [timestamp, rank, timestamp, rank, ...] }
-        // La categoria Renewed è la più specifica (rank più basso tra le sottocategorie).
-        function lastRankFromSeries(series) {
-          if (!Array.isArray(series)) return null;
-          for (let i = series.length - 1; i >= 1; i -= 2) {
-            const v = series[i];
-            if (typeof v === "number" && v > 0) return v;
-          }
-          return null;
-        }
-        if (p.salesRanks && typeof p.salesRanks === "object") {
-          const rootCat = String(p.salesRankReference || p.rootCategory || "");
-          const candidates = [];
-          for (const catId of Object.keys(p.salesRanks)) {
-            // Escludo la categoria root (Elettronica): troppo generica
-            if (catId === rootCat) continue;
-            const r = lastRankFromSeries(p.salesRanks[catId]);
-            if (r !== null) candidates.push(r);
-          }
-          if (candidates.length > 0) {
-            // La sottocategoria "Renewed" ha sempre il rank più basso (più specifica)
-            salesRank = Math.min.apply(null, candidates);
-          }
-        }
-        // Fallback 1: stats.current[3] (BSR categoria principale, meno preciso)
-        if (!salesRank && p.stats && Array.isArray(p.stats.current) && p.stats.current[3] > 0) {
-          salesRank = p.stats.current[3];
-        }
-        // Fallback 2: csv[3] ultimo valore valido
-        if (!salesRank && Array.isArray(csv[3]) && csv[3].length >= 2) {
-          for (let i = csv[3].length - 1; i >= 0; i -= 2) {
-            const v = csv[3][i];
-            if (typeof v === "number" && v > 0) { salesRank = v; break; }
-          }
-        }
-      }
-    }).catch(() => { keepaOk = false; })
-  );
-
-  // SerpApi (Featured)
-  if (SERPAPI_KEY) {
-    promises.push(
-      callSerpapi(asin, domain).then(data => {
-        serpapiOk = true;
-        if (!title && data && data.product_results && data.product_results.title) {
-          title = data.product_results.title;
-        }
-        const po = extractSerpapiPurchaseOptions(data);
-        excellent  = po.refurbished_excellent;
-        good       = po.refurbished_good;
-        acceptable = po.refurbished_acceptable;
-        premium    = po.refurbished_premium;
-      }).catch(() => { serpapiOk = false; })
-    );
-  }
-
-  // Ninja (MIN reale + Featured Excellent da buy_boxes + posizione Recover)
-  if (NINJA_KEY) {
-    promises.push(
-      callNinja(asin, domain).then(raw => {
-        ninjaOk = true;
-        const d = (raw && raw.data) || {};
-        if (!title && d.product_title) title = d.product_title;
-        const offers = Array.isArray(d.product_offers) ? d.product_offers : [];
-
-        const enriched = offers.map(function (o, idx) {
-          const p = priceFromOffer(o);
-          const df = parseDeliveryFee(o.delivery_price);
-          const sellerLink = o.seller_link || "";
-          const isFBA = (o.ships_from === "Amazon") || /isAmazonFulfilled=1/.test(sellerLink);
-          return {
-            rank: idx + 1,
-            price: p,
-            deliveryFee: df,
-            totalPrice: p !== null ? Math.round((p + df) * 100) / 100 : null,
-            condition: classifyCondition(o.product_condition),
-            seller: o.seller || null,
-            sellerId: o.seller_id || null,
-            sellerRating: parseSellerRating(o.seller_star_rating),
-            positivePercent: parsePositivePercent(o.seller_star_rating_info),
-            deliveryText: o.delivery_price || null,
-            isFBA: isFBA,
-          };
-        }).filter(function (o) { return o.price !== null; });
-
-        function buildMin(cond) {
-          const list = enriched.filter(o => o.condition === cond);
-          if (list.length === 0) {
-            return { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
-          }
-          const byTotal = [...list].sort((a, b) => a.totalPrice - b.totalPrice);
-          const minByTotal = byTotal[0];
-          const byPrice = [...list].sort((a, b) => a.price - b.price);
-          const minByPrice = byPrice[0];
-
-          let apparent = null;
-          if (minByPrice.sellerId !== minByTotal.sellerId && minByPrice.price < minByTotal.totalPrice) {
-            apparent = {
-              price: minByPrice.price,
-              deliveryFee: minByPrice.deliveryFee,
-              totalPrice: minByPrice.totalPrice,
-              seller: minByPrice.seller,
-              sellerId: minByPrice.sellerId,
-              positivePercent: minByPrice.positivePercent,
-              rank: minByPrice.rank,
-            };
-          }
-
-          return {
-            price: minByTotal.price,
-            totalPrice: minByTotal.totalPrice,
-            deliveryFee: minByTotal.deliveryFee,
-            seller: minByTotal.seller,
-            sellerId: minByTotal.sellerId,
-            positivePercent: minByTotal.positivePercent,
-            rank: minByTotal.rank,
-            count: list.length,
-            available: true,
-            apparentMin: apparent,
-          };
-        }
-
-        excellentMinReal  = buildMin("excellent");
-        goodMinReal       = buildMin("good");
-        acceptableMinReal = buildMin("acceptable");
-
-        // BUY BOX EXCELLENT:
-        // 1. Cerca in buy_boxes[] di Ninja (Buy Box ufficiale per condition, coerente con la pagina prodotto)
-        // 2. Trova seller corrispondente cercando per prezzo nelle product_offers
-        // 3. Fallback: prima offerta Excellent nella lista product_offers (se buy_boxes non ha Excellent)
-        const buyBoxes = Array.isArray(d.buy_boxes) ? d.buy_boxes : [];
-        const bbExcellent = buyBoxes.find(b => classifyCondition(b.title) === "excellent");
-
-        let bbPrice = null;
-        let bbSeller = null;
-        let bbIsFBA = false;
-
-        if (bbExcellent && bbExcellent.price) {
-          bbPrice = parsePrice(bbExcellent.price);
-          if (bbPrice) {
-            const match = enriched.filter(o => o.condition === "excellent" && Math.abs(o.price - bbPrice) < 0.5);
-            if (match.length > 0) {
-              bbSeller = match[0].seller;
-              bbIsFBA = match[0].isFBA;
-            }
-          }
-        }
-
-        // Fallback: se buy_boxes non aveva Excellent ma ci sono offerte Excellent in lista
-        if (!bbPrice) {
-          const excellentList = enriched.filter(o => o.condition === "excellent");
-          if (excellentList.length > 0) {
-            const first = excellentList.sort((a, b) => a.rank - b.rank)[0];
-            bbPrice = first.price;
-            bbSeller = first.seller;
-            bbIsFBA = first.isFBA;
-          }
-        }
-
-        if (bbPrice) {
-          ninjaFeaturedExcellent = {
-            price: bbPrice,
-            seller: bbSeller,
-            isFBA: bbIsFBA,
-            available: true,
-          };
-        }
-
-        const myOffer = enriched.find(o => o.sellerId === RECOVER_SELLER_ID);
-        if (myOffer) {
-          recoverPosition = {
-            inList: true,
-            rank: myOffer.rank,
-            condition: myOffer.condition,
-            price: myOffer.price,
-            isLowest: false,
-            tiedLowest: false,
-            tiedSeller: null,
-            nextPrice: null,
-            nextSeller: null,
-            nextFeedback: null,
-            ceilingPrice: null,
-            priceGain: null,
-          };
-          // Se Recover è in condition Excellent, calcolo posizione e next competitor
-          if (myOffer.condition === "excellent") {
-            const otherExcellent = enriched
-              .filter(o => o.condition === "excellent" && o.sellerId !== RECOVER_SELLER_ID)
-              .sort((a, b) => a.totalPrice - b.totalPrice);
-            if (otherExcellent.length > 0) {
-              const cheapest = otherExcellent[0];
-              const EPS = 0.01; // tolleranza centesimi per "stesso prezzo"
-              if (myOffer.totalPrice < cheapest.totalPrice - EPS) {
-                // Recover strettamente il più basso → suggerisci di alzare fino al competitor
-                recoverPosition.isLowest = true;
-                recoverPosition.nextPrice = cheapest.totalPrice;
-                recoverPosition.nextSeller = cheapest.seller;
-                recoverPosition.nextFeedback = cheapest.positivePercent;
-                recoverPosition.ceilingPrice = Math.round((cheapest.totalPrice - 0.01) * 100) / 100;
-                recoverPosition.priceGain = Math.round((recoverPosition.ceilingPrice - myOffer.totalPrice) * 100) / 100;
-              } else if (Math.abs(myOffer.totalPrice - cheapest.totalPrice) <= EPS) {
-                // Recover alla pari col competitor più basso → già competitivo, NON alzare
-                recoverPosition.tiedLowest = true;
-                recoverPosition.tiedSeller = cheapest.seller;
-                recoverPosition.nextPrice = cheapest.totalPrice;
-                recoverPosition.nextSeller = cheapest.seller;
-                recoverPosition.nextFeedback = cheapest.positivePercent;
-              }
-              // else: Recover non è il più basso → resta caso #3 (rank)
-            } else {
-              // Recover unico Excellent
-              recoverPosition.isLowest = true;
-            }
-          }
-        }
-
-        if (monthlySold === null && d.sales_volume) {
-          const n = parseMonthlySoldFromText(d.sales_volume);
-          if (n !== null) monthlySold = n;
-        }
-      }).catch(() => { ninjaOk = false; })
-    );
-  }
-
-  await Promise.all(promises);
-
-  // MERGE: Ninja Buy Box ha priorità su SerpApi per Featured Excellent (più affidabile)
-  if (ninjaFeaturedExcellent && ninjaFeaturedExcellent.available) {
-    excellent = ninjaFeaturedExcellent;
-  }
-
-  res.json({
-    ok: true,
-    asin: asin,
-    domain: domain,
-    market: MARKET_CODE[domain] || "IT",
-    title: title,
-    monthlySold: monthlySold,
-    salesRank: salesRank,
-    amazonBuyBox: amazonBuyBox,
-    // Featured (SerpApi)
-    excellent: excellent,
-    good: good,
-    acceptable: acceptable,
-    premium: premium,
-    // MIN reale (Ninja)
-    excellentMinReal: excellentMinReal,
-    goodMinReal: goodMinReal,
-    acceptableMinReal: acceptableMinReal,
-    // Recover
-    recoverPosition: recoverPosition,
-    // Flags
-    keepaOk: keepaOk,
-    serpapiOk: serpapiOk,
-    ninjaOk: ninjaOk,
-  });
-});
-
-// =============================================================
-// BULK-SCAN — versione massiva di scan-asin
-// =============================================================
-app.post("/api/bulk-scan", async (req, res) => {
-  const items = req.body && req.body.items;
-  if (!Array.isArray(items)) return res.status(400).json({ error: "items[] required" });
-
-  const out = [];
-  const batchSize = 5;
-
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const batchRes = await Promise.all(batch.map(async function (it) {
-      const asin = it.asin;
-      const domain = parseInt(it.domain || 8, 10);
-      let keepaOk = false, serpapiOk = false;
-      let title = null, monthlySold = null;
-      let excellent  = { price: null, seller: null, available: false };
-      let good       = { price: null, seller: null, available: false };
-      let acceptable = { price: null, seller: null, available: false };
-      let premium    = { price: null, seller: null, available: false };
-
-      const promises = [];
-      promises.push(
-        callKeepa(asin, domain, false).then(json => {
-          const p = json && json.products && json.products[0];
-          if (p) {
-            keepaOk = true;
-            title = p.title || null;
-            if (typeof p.monthlySold === "number") monthlySold = p.monthlySold;
-          }
-        }).catch(() => { keepaOk = false; })
-      );
-      if (SERPAPI_KEY) {
-        promises.push(
-          callSerpapi(asin, domain).then(data => {
-            serpapiOk = true;
-            const po = extractSerpapiPurchaseOptions(data);
-            excellent  = po.refurbished_excellent;
-            good       = po.refurbished_good;
-            acceptable = po.refurbished_acceptable;
-            premium    = po.refurbished_premium;
-          }).catch(() => { serpapiOk = false; })
-        );
-      }
-
-      await Promise.all(promises);
-      return {
-        asin: asin, domain: domain,
-        market: MARKET_CODE[domain] || "IT",
-        title: title, monthlySold: monthlySold,
-        excellent: excellent, good: good, acceptable: acceptable, premium: premium,
-        keepaOk: keepaOk, serpapiOk: serpapiOk,
-      };
-    }));
-    out.push.apply(out, batchRes);
-  }
-
-  res.json({ count: out.length, results: out });
-});
-
-// =============================================================
-// SCAN-ASIN-DEEP — Ninja con MIN reale + seller + posizione Recover
-// =============================================================
-app.get("/api/scan-asin-deep", async (req, res) => {
-  if (!NINJA_KEY) return res.status(400).json({ error: "Ninja key not configured" });
-  const asin = req.query.asin, domain = req.query.domain || 8;
-  if (!asin) return res.status(400).json({ error: "asin required" });
-
+async function loadBMData() {
+  const btn = document.getElementById('bm-load-btn');
+  const status = document.getElementById('bm-status');
+  btn.textContent = '⟳ Caricamento...'; btn.disabled = true;
+  status.textContent = 'Recupero dati da IT, FR, DE, ES, NL...';
   try {
-    const raw = await callNinja(asin, parseInt(domain, 10));
-    const d = (raw && raw.data) || {};
-    const offers = Array.isArray(d.product_offers) ? d.product_offers : [];
-
-    const enriched = offers.map(function (o, idx) {
-      return {
-        rank: idx + 1,
-        price: priceFromOffer(o),
-        condition: classifyCondition(o.product_condition),
-        rawCondition: o.product_condition || null,
-        seller: o.seller || null,
-        sellerId: o.seller_id || null,
-        sellerRating: parseSellerRating(o.seller_star_rating),
-        positivePercent: parsePositivePercent(o.seller_star_rating_info),
-        delivery: o.delivery_price || null,
-        deliveryTime: o.delivery_time || null,
-      };
-    }).filter(function (o) { return o.price !== null; });
-
-    function groupBy(cond) {
-      const list = enriched
-        .filter(function (o) { return o.condition === cond; })
-        .sort(function (a, b) { return a.price - b.price; });
-      return { count: list.length, min: list[0] || null, offers: list };
-    }
-
-    const featured = {
-      price: parsePrice(d.product_price),
-      condition: classifyCondition(d.product_condition),
-      rawCondition: d.product_condition || null,
-    };
-
-    const salesVolumeText = d.sales_volume || null;
-    const monthlySold = parseMonthlySoldFromText(salesVolumeText);
-    const recoverOffer = enriched.find(function (o) { return o.sellerId === RECOVER_SELLER_ID; }) || null;
-
-    const excellent = groupBy("excellent");
-    const good = groupBy("good");
-    const acceptable = groupBy("acceptable");
-    const premium = groupBy("premium");
-
-    let suggestion = null;
-    if (excellent.min) {
-      if (recoverOffer && recoverOffer.condition === "excellent") {
-        if (recoverOffer.price === excellent.min.price) {
-          suggestion = { status: "win", note: "Recover è MIN Eccellente" };
-        } else {
-          suggestion = {
-            status: "behind",
-            note: `Recover a €${recoverOffer.price}, MIN a €${excellent.min.price} (${excellent.min.seller})`,
-            targetPrice: Math.max(0, excellent.min.price - 1),
-          };
-        }
-      } else {
-        suggestion = {
-          status: "not_listed",
-          note: `Recover non in lista. MIN Eccellente €${excellent.min.price} (${excellent.min.seller})`,
-          targetPrice: Math.max(0, excellent.min.price - 1),
-        };
-      }
-    } else {
-      suggestion = { status: "no_excellent", note: "Nessuna offerta Eccellente attiva" };
-    }
-
-    res.json({
-      ok: true, asin: asin, domain: parseInt(domain, 10),
-      market: NINJA_COUNTRY[domain] || "IT",
-      title: d.product_title || null,
-      productUrl: d.product_url || null,
-      totalOffersInListing: d.product_num_offers || null,
-      offersReturned: offers.length,
-      salesVolumeText: salesVolumeText,
-      monthlySold: monthlySold,
-      featured: featured,
-      excellent: excellent, good: good, acceptable: acceptable, premium: premium,
-      recover: { inList: !!recoverOffer, offer: recoverOffer },
-      suggestion: suggestion,
-      fetchedAt: new Date().toISOString(),
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: `scan-asin-deep error: ${e.message}` });
-  }
-});
-
-// =============================================================
-// BACK MARKET
-// =============================================================
-const BM_HOSTS = {
-  fr: "https://www.backmarket.fr",
-  de: "https://www.backmarket.de",
-  it: "https://www.backmarket.it",
-  es: "https://www.backmarket.es",
-  nl: "https://www.backmarket.nl",
-};
-
-app.get("/api/backmarket/listings", async (req, res) => {
-  if (!BM_KEY) return res.status(400).json({ error: "BM key not configured" });
-  const market = String(req.query.market || "FR").toLowerCase();
-  const host = BM_HOSTS[market] || BM_HOSTS.fr;
-  const lang = `${market}-${market}`;
-  try {
-    const r = await fetchWithTimeout(`${host}/ws/listings`, {
-      headers: { Authorization: `Basic ${BM_KEY}`, Accept: "application/json", "Accept-Language": lang },
-    }, 25000);
+    const r = await fetch('/api/backmarket/all');
     const data = await r.json();
-    res.json({ market: market.toUpperCase(), data: data });
-  } catch (e) {
-    res.status(500).json({ error: `BM listings error: ${e.message}` });
-  }
-});
-
-app.get("/api/backmarket/all", async (req, res) => {
-  if (!BM_KEY) return res.status(400).json({ error: "BM key not configured" });
-  const markets = ["it", "fr", "de", "es", "nl"];
-  try {
-    const out = {};
-    await Promise.all(markets.map(async function (m) {
-      try {
-        const r = await fetchWithTimeout(`${BM_HOSTS[m]}/ws/listings`, {
-          headers: { Authorization: `Basic ${BM_KEY}`, Accept: "application/json", "Accept-Language": `${m}-${m}` },
-        }, 25000);
-        const data = await r.json();
-        out[m] = { data: data };
-      } catch (err) {
-        out[m] = { error: err.message };
+    bmData = data;
+    const products = {};
+    for (const country of BM_COUNTRIES) {
+      const countryListings = data[country]?.data?.results || data[country] || [];
+      for (const listing of countryListings) {
+        const bid = listing.backmarket_id;
+        if (!bid) continue;
+        if (!products[bid]) products[bid] = { sku: listing.sku, title: listing.title, grade: listing.grade, countries: {} };
+        products[bid].countries[country] = { price: listing.price, min_price: listing.min_price, max_price: listing.max_price, state: listing.publication_state };
       }
-    }));
-    res.json(out);
-  } catch (e) {
-    res.status(500).json({ error: `BM all error: ${e.message}` });
+    }
+    bmData._products = products;
+    renderBMTable(products);
+    status.textContent = `✓ ${Object.keys(products).length} prodotti caricati`;
+  } catch(e) {
+    status.textContent = 'Errore: ' + e.message;
   }
-});
+  btn.textContent = '⟳ Aggiorna'; btn.disabled = false;
+}
 
-// =============================================================
-// BULK PRICE (legacy)
-// =============================================================
-app.post("/api/bulk-price", async (req, res) => {
-  const items = req.body && req.body.items;
-  if (!Array.isArray(items)) return res.status(400).json({ error: "items[] required" });
-  const out = [];
-  const batchSize = 5;
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const batchRes = await Promise.all(batch.map(async function (it) {
-      try {
-        const json = await callKeepa(it.asin, it.domain, true);
-        const p = json && json.products && json.products[0];
-        return { asin: it.asin, domain: it.domain, title: (p && p.title) || null, monthlySold: (p && p.monthlySold) || null, offers: (p && p.offers) || [], ok: true };
-      } catch (err) {
-        return { asin: it.asin, domain: it.domain, ok: false, error: err.message };
+function filterBM() {
+  if (!bmData?._products) return;
+  const q = document.getElementById('bm-search').value.toLowerCase().trim();
+  const filtered = {};
+  for (const [bid, p] of Object.entries(bmData._products)) {
+    if (!q || p.sku?.toLowerCase().includes(q) || p.title?.toLowerCase().includes(q)) filtered[bid] = p;
+  }
+  renderBMTable(filtered);
+}
+
+function renderBMTable(products) {
+  const wrap = document.getElementById('bm-table-wrap');
+  const entries = Object.entries(products);
+  if (!entries.length) { wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#8890aa;">Nessun risultato</div>'; return; }
+  const rows = entries.map(([bid, p]) => {
+    const cCells = BM_COUNTRIES.map(c => {
+      const d = p.countries[c];
+      if (!d) return `<td style="padding:7px 10px;color:#2e3350;text-align:center;">—</td>`;
+      const price = d.price ? '€'+parseFloat(d.price).toFixed(0) : '—';
+      const bb = d.max_price ? '€'+d.max_price : '—';
+      const isActive = d.state === 3;
+      return `<td style="padding:7px 10px;text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:${isActive?'#48bb78':'#8890aa'}">${price}</div>
+        <div style="font-size:9px;color:#4f8ef7;">BB: ${bb}</div></td>`;
+    }).join('');
+    return `<tr style="border-bottom:1px solid rgba(46,51,80,0.5);">
+      <td style="padding:7px 10px;">
+        <div style="font-size:11px;font-weight:600;color:#e8eaf0;">${p.sku||'—'}</div>
+        <div style="font-size:9px;color:#8890aa;margin-top:1px;">${GRADE_LABELS[p.grade]||p.grade} · BM#${bid}</div>
+      </td>${cCells}</tr>`;
+  }).join('');
+  wrap.innerHTML = `<div style="background:#1a1d27;border:1px solid #2e3350;border-radius:10px;overflow:hidden;">
+    <div style="overflow-x:auto;max-height:60vh;overflow-y:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead style="position:sticky;top:0;background:#1a1d27;">
+          <tr style="border-bottom:2px solid #2e3350;">
+            <th style="padding:8px 10px;text-align:left;font-size:9px;color:#8890aa;text-transform:uppercase;letter-spacing:1px;">Prodotto</th>
+            ${BM_COUNTRIES.map(c=>`<th style="padding:8px 10px;text-align:center;font-size:12px;">${BM_FLAGS[c]}</th>`).join('')}
+          </tr>
+        </thead><tbody>${rows}</tbody></table></div></div>`;
+}
+</script>
+<script>
+const CATALOG = [
+  ["SE","iPhone SE 2","64GB","Galassia","B08D326ZPT","B08D326ZPT","B08D326ZPT","B08D326ZPT"],
+  ["SE","iPhone SE 2","64GB","Rosso","B08D351RSN","B08D351RSN","B08D351RSN","B08D351RSN"],
+  ["SE","iPhone SE 2","64GB","Mezzanotte","B08D39SX4M","B08D39SX4M","B08D39SX4M","B08D39SX4M"],
+  ["SE","iPhone SE 2","128GB","Galassia","B08D2YVV7G","B08D2YVV7G","B08D2YVV7G","B08D2YVV7G"],
+  ["SE","iPhone SE 2","128GB","Rosso","B08D238QLH","B08D238QLH","B08D238QLH","B08D238QLH"],
+  ["SE","iPhone SE 2","128GB","Mezzanotte","B08D377VBX","B08D377VBX","B08D377VBX","B08D377VBX"],
+  ["SE","iPhone SE 2","256GB","Galassia","B08D37NY59","B08D37NY59","B08D37NY59","B08D37NY59"],
+  ["SE","iPhone SE 2","256GB","Rosso","B08D3FTZHT","B08D3FTZHT","B08D3FTZHT","B08D3FTZHT"],
+  ["SE","iPhone SE 2","256GB","Mezzanotte","B08D3JV5SX","B08D3JV5SX","B08D3JV5SX","B08D3JV5SX"],
+  ["SE","iPhone SE 3","64GB","Galassia","B0BGFMFXLP","B0BGFMFXLP","B0BGFMFXLP","B0BGFMFXLP"],
+  ["SE","iPhone SE 3","64GB","Rosso","B0BGFL1W1N","B0BGFL1W1N","B0BGFL1W1N","B0BGFL1W1N"],
+  ["SE","iPhone SE 3","64GB","Mezzanotte","B0BDY71GRG","B0BDY71GRG","B0BDY71GRG","B0BDY71GRG"],
+  ["SE","iPhone SE 3","128GB","Galassia","B0BGFX32KX","B0BGFX32KX","B0BGFX32KX","B0BGFX32KX"],
+  ["SE","iPhone SE 3","128GB","Rosso","B0BGFYLHHJ","B0BGFYLHHJ","B0BGFYLHHJ","B0BGFYLHHJ"],
+  ["SE","iPhone SE 3","128GB","Mezzanotte","B0BGFMLN1W","B0BGFMLN1W","B0BGFMLN1W","B0BGFMLN1W"],
+  ["SE","iPhone SE 3","256GB","Galassia","B0BGFL341Z","B0BGFL341Z","B0BGFL341Z","B0BGFL341Z"],
+  ["SE","iPhone SE 3","256GB","Rosso","B0BGFJKTHR","B0BGFJKTHR","B0BGFJKTHR","B0BGFJKTHR"],
+  ["SE","iPhone SE 3","256GB","Mezzanotte","B0BGFMWDXJ","B0BGFMWDXJ","B0BGFMWDXJ","B0BGFMWDXJ"],
+  ["12","iPhone 12 Mini","64GB","Bianco","B08PCDBHFF","B08PCDBHFF","B08PCDBHFF","B08PCDBHFF"],
+  ["12","iPhone 12 Mini","64GB","Nero","B08PCF2P4R","B08PCF2P4R","B08PCF2P4R","B08PCF2P4R"],
+  ["12","iPhone 12 Mini","64GB","Blu","B08PCD1417","B08PCD1417","B08PCD1417","B08PCD1417"],
+  ["12","iPhone 12 Mini","64GB","Rosso","B08PCFB3NY","B08PCFB3NY","B08PCFB3NY","B08PCFB3NY"],
+  ["12","iPhone 12 Mini","64GB","Verde","B08PCFKJLL","B08PCFKJLL","B08PCFKJLL","B08PCFKJLL"],
+  ["12","iPhone 12 Mini","64GB","Viola","B0977N4GYG","B0977N4GYG","B0977N4GYG","B0977N4GYG"],
+  ["12","iPhone 12 Mini","128GB","Bianco","B08PCD77DV","B08PCD77DV","B08PCD77DV","B08PCD77DV"],
+  ["12","iPhone 12 Mini","128GB","Nero","B08PCDKD6G","B08PCDKD6G","B08PCDKD6G","B08PCDKD6G"],
+  ["12","iPhone 12 Mini","128GB","Blu","B08PCDNC9W","B08PCDNC9W","B08PCDNC9W","B08PCDNC9W"],
+  ["12","iPhone 12 Mini","128GB","Rosso","B08PCC2N1J","B08PCC2N1J","B08PCC2N1J","B08PCC2N1J"],
+  ["12","iPhone 12 Mini","128GB","Verde","B08PCFKLHM","B08PCFKLHM","B08PCFKLHM","B08PCFKLHM"],
+  ["12","iPhone 12 Mini","128GB","Viola","B0977N1YK6","B0977N1YK6","B0977N1YK6","B0977N1YK6"],
+  ["12","iPhone 12 Mini","256GB","Bianco","B08PCFC3C1","B08PCFC3C1","B08PCFC3C1","B08PCFC3C1"],
+  ["12","iPhone 12 Mini","256GB","Nero","B08PCCTXN2","B08PCCTXN2","B08PCCTXN2","B08PCCTXN2"],
+  ["12","iPhone 12 Mini","256GB","Blu","B08PCDKZMW","B08PCDKZMW","B08PCDKZMW","B08PCDKZMW"],
+  ["12","iPhone 12 Mini","256GB","Rosso","B08PCDG12D","B08PCDG12D","B08PCDG12D","B08PCDG12D"],
+  ["12","iPhone 12 Mini","256GB","Verde","B08PCDJ8WP","B08PCDJ8WP","B08PCDJ8WP","B08PCDJ8WP"],
+  ["12","iPhone 12 Mini","256GB","Viola","B0977Q33D7","B0977Q33D7","B0977Q33D7","B0977Q33D7"],
+  ["12","iPhone 12","64GB","Bianco","B08PCG664W","B08PCG664W","B08PCG664W","B08PCG664W"],
+  ["12","iPhone 12","64GB","Nero","B08PCFVC58","B08PCFVC58","B08PCFVC58","B08PCFVC58"],
+  ["12","iPhone 12","64GB","Blu","B08PCFHLGC","B08PCFHLGC","B08PCFHLGC","B08PCFHLGC"],
+  ["12","iPhone 12","64GB","Rosso","B08PCD6N73","B08PCD6N73","B08PCD6N73","B08PCD6N73"],
+  ["12","iPhone 12","64GB","Verde","B08PCCS7PH","B08PCCS7PH","B08PCCS7PH","B08PCCS7PH"],
+  ["12","iPhone 12","64GB","Viola","B0B42V45SV","B0B42V45SV","B0B42V45SV","B0B42V45SV"],
+  ["12","iPhone 12","128GB","Bianco","B08PCCZMMR","B08PCCZMMR","B08PCCZMMR","B08PCCZMMR"],
+  ["12","iPhone 12","128GB","Nero","B08PCGL5TH","B08PCGL5TH","B08PCGL5TH","B08PCGL5TH"],
+  ["12","iPhone 12","128GB","Blu","B08PCCJP5C","B08PCCJP5C","B08PCCJP5C","B08PCCJP5C"],
+  ["12","iPhone 12","128GB","Rosso","B08PCCZ7XT","B08PCCZ7XT","B08PCCZ7XT","B08PCCZ7XT"],
+  ["12","iPhone 12","128GB","Verde","B08PCFV74N","B08PCFV74N","B08PCFV74N","B08PCFV74N"],
+  ["12","iPhone 12","128GB","Viola","B09CLGDGTL","B09CLGDGTL","B09CLGDGTL","B09CLGDGTL"],
+  ["12","iPhone 12","256GB","Bianco","B08PCC743H","B08PCC743H","B08PCC743H","B08PCC743H"],
+  ["12","iPhone 12","256GB","Nero","B08PCCZB1H","B08PCCZB1H","B08PCCZB1H","B08PCCZB1H"],
+  ["12","iPhone 12","256GB","Blu","B08PCFF5QB","B08PCFF5QB","B08PCFF5QB","B08PCFF5QB"],
+  ["12","iPhone 12","256GB","Rosso","B08PCFMXN4","B08PCFMXN4","B08PCFMXN4","B08PCFMXN4"],
+  ["12","iPhone 12","256GB","Verde","B08PCF4MBB","B08PCF4MBB","B08PCF4MBB","B08PCF4MBB"],
+  ["12","iPhone 12","256GB","Viola","B09MJMBS9X","B09MJMBS9X","B09MJMBS9X","B09MJMBS9X"],
+  ["12","iPhone 12 Pro","128GB","Argento","B08PCCM1GC","B08PCCM1GC","B08PCCM1GC","B08PCCM1GC"],
+  ["12","iPhone 12 Pro","128GB","Blu","B08PCB8QCV","B08PCB8QCV","B08PCB8QCV","B08PCB8QCV"],
+  ["12","iPhone 12 Pro","128GB","Graphite","B08PCDP3LM","B08PCDP3LM","B08PCDP3LM","B08PCDP3LM"],
+  ["12","iPhone 12 Pro","128GB","Oro","B08PCD292R","B08PCD292R","B08PCD292R","B08PCD292R"],
+  ["12","iPhone 12 Pro","256GB","Argento","B08PCD9K1Q","B08PCD9K1Q","B08PCD9K1Q","B08PCD9K1Q"],
+  ["12","iPhone 12 Pro","256GB","Blu","B08PCC2Y59","B08PCC2Y59","B08PCC2Y59","B08PCC2Y59"],
+  ["12","iPhone 12 Pro","256GB","Graphite","B08PCD4VHZ","B08PCD4VHZ","B08PCD4VHZ","B08PCD4VHZ"],
+  ["12","iPhone 12 Pro","256GB","Oro","B08PCBMW7Y","B08PCBMW7Y","B08PCBMW7Y","B08PCBMW7Y"],
+  ["12","iPhone 12 Pro","512GB","Argento","B08PCC7TTN","B08PCC7TTN","B08PCC7TTN","B08PCC7TTN"],
+  ["12","iPhone 12 Pro","512GB","Blu","B08PCD77YK","B08PCD77YK","B08PCD77YK","B08PCD77YK"],
+  ["12","iPhone 12 Pro","512GB","Graphite","B08PCDHXTD","B08PCDHXTD","B08PCDHXTD","B08PCDHXTD"],
+  ["12","iPhone 12 Pro","512GB","Oro","B08PCFKSQM","B08PCFKSQM","B08PCFKSQM","B08PCFKSQM"],
+  ["12","iPhone 12 Pro Max","128GB","Argento","B08PCCKZR7","B08PCCKZR7","B08PCCKZR7","B08PCCKZR7"],
+  ["12","iPhone 12 Pro Max","128GB","Blu","B08PCCKHJM","B08PCCKHJM","B08PCCKHJM","B08PCCKHJM"],
+  ["12","iPhone 12 Pro Max","128GB","Graphite","B08PCDHMWQ","B08PCDHMWQ","B08PCDHMWQ","B08PCDHMWQ"],
+  ["12","iPhone 12 Pro Max","128GB","Oro","B08PCCQT8D","B08PCCQT8D","B08PCCQT8D","B08PCCQT8D"],
+  ["12","iPhone 12 Pro Max","256GB","Argento","B08PCGS8DP","B08PCGS8DP","B08PCGS8DP","B08PCGS8DP"],
+  ["12","iPhone 12 Pro Max","256GB","Blu","B08PCD1YDK","B08PCD1YDK","B08PCD1YDK","B08PCD1YDK"],
+  ["12","iPhone 12 Pro Max","256GB","Graphite","B08PCC7RG1","B08PCC7RG1","B08PCC7RG1","B08PCC7RG1"],
+  ["12","iPhone 12 Pro Max","256GB","Oro","B08PCDF471","B08PCDF471","B08PCDF471","B08PCDF471"],
+  ["12","iPhone 12 Pro Max","512GB","Argento","B08PCD19R9","B08PCD19R9","B08PCD19R9","B08PCD19R9"],
+  ["12","iPhone 12 Pro Max","512GB","Blu","B08PCCCZQ7","B08PCCCZQ7","B08PCCCZQ7","B08PCCCZQ7"],
+  ["12","iPhone 12 Pro Max","512GB","Graphite","B08PCCB12Y","B08PCCB12Y","B08PCCB12Y","B08PCCB12Y"],
+  ["12","iPhone 12 Pro Max","512GB","Oro","B08PC7R58F","B08PC7R58F","B08PC7R58F","B08PC7R58F"],
+  ["13","iPhone 13 Mini","128GB","Galassia","B09MJT4WMD","B09MJT4WMD","B09MJT4WMD","B09MJT4WMD"],
+  ["13","iPhone 13 Mini","128GB","Mezzanotte","B09MJSRKWK","B09MJSRKWK","B09MJSRKWK","B09MJSRKWK"],
+  ["13","iPhone 13 Mini","128GB","Rosa","B09MJRSQBD","B09MJRSQBD","B09MJRSQBD","B09MJRSQBD"],
+  ["13","iPhone 13 Mini","128GB","Rosso","B09MJSNT1W","B09MJSNT1W","B09MJSNT1W","B09MJSNT1W"],
+  ["13","iPhone 13 Mini","128GB","Azzurro","B09MJRSWGZ","B09MJRSWGZ","B09MJRSWGZ","B09MJRSWGZ"],
+  ["13","iPhone 13 Mini","128GB","Verde","B0BBQRSMTM","B0BBQRSMTM","B0BBQRSMTM","B0BBQRSMTM"],
+  ["13","iPhone 13 Mini","256GB","Galassia","B09MJS19W7","B09MJS19W7","B09MJS19W7","B09MJS19W7"],
+  ["13","iPhone 13 Mini","256GB","Mezzanotte","B09MJSVVC9","B09MJSVVC9","B09MJSVVC9","B09MJSVVC9"],
+  ["13","iPhone 13 Mini","256GB","Rosa","B09MJRFC8X","B09MJRFC8X","B09MJRFC8X","B09MJRFC8X"],
+  ["13","iPhone 13 Mini","256GB","Rosso","B09ML7MBCG","B09ML7MBCG","B09ML7MBCG","B09ML7MBCG"],
+  ["13","iPhone 13 Mini","256GB","Azzurro","B09MJRVRR4","B09MJRVRR4","B09MJRVRR4","B09MJRVRR4"],
+  ["13","iPhone 13 Mini","256GB","Verde","B0BBQ9MZ6P","B0BBQ9MZ6P","B0BBQ9MZ6P","B0BBQ9MZ6P"],
+  ["13","iPhone 13 Mini","512GB","Galassia","B09MJTCQLL","B09MJTCQLL","",""],
+  ["13","iPhone 13 Mini","512GB","Mezzanotte","B09MJSXCHP","B09MJSXCHP","","B09MJSXCHP"],
+  ["13","iPhone 13 Mini","512GB","Rosa","B09MJR29PY","B09MJR29PY","B09MJR29PY","B09MJR29PY"],
+  ["13","iPhone 13 Mini","512GB","Rosso","","","",""],
+  ["13","iPhone 13 Mini","512GB","Azzurro","B09MJS8BLX","B09MJS8BLX","",""],
+  ["13","iPhone 13 Mini","512GB","Verde","","","",""],
+  ["13","iPhone 13","128GB","Galassia","B09MGDRQSS","B09MGDRQSS","B09MGDRQSS","B09MGDRQSS"],
+  ["13","iPhone 13","128GB","Mezzanotte","B09MGFJK73","B09MGFJK73","B09MGFJK73","B09MGFJK73"],
+  ["13","iPhone 13","128GB","Rosa","B09MGGF9JG","B09MGGF9JG","B09MGGF9JG","B09MGGF9JG"],
+  ["13","iPhone 13","128GB","Rosso","B09MJV1MZG","B09MJV1MZG","B09MJV1MZG","B09MJV1MZG"],
+  ["13","iPhone 13","128GB","Azzurro","B09MJTKXY8","B09MJTKXY8","B09MJTKXY8","B09MJTKXY8"],
+  ["13","iPhone 13","128GB","Verde","B0BBPGSSFZ","B0BBPGSSFZ","B0BBPGSSFZ","B0BBPGSSFZ"],
+  ["13","iPhone 13","256GB","Galassia","B09G8Y428Z","B09G8Y428Z","B09G8Y428Z","B09G8Y428Z"],
+  ["13","iPhone 13","256GB","Mezzanotte","B09MJSHQ6C","B09MJSHQ6C","B09MJSHQ6C","B09MJSHQ6C"],
+  ["13","iPhone 13","256GB","Rosa","B09MJTNYZS","B09MJTNYZS","B09MJTNYZS","B09MJTNYZS"],
+  ["13","iPhone 13","256GB","Rosso","B09MJS9WZT","B09MJS9WZT","B09MJS9WZT","B09MJS9WZT"],
+  ["13","iPhone 13","256GB","Azzurro","B09MGGV4TN","B09MGGV4TN","B09MGGV4TN","B09MGGV4TN"],
+  ["13","iPhone 13","256GB","Verde","B0BBPGVQ9V","B0BBPGVQ9V","B0BBPGVQ9V","B0BBPGVQ9V"],
+  ["13","iPhone 13","512GB","Galassia","B09MJT3QCX","B09MJT3QCX","B09MJT3QCX","B09MJT3QCX"],
+  ["13","iPhone 13","512GB","Mezzanotte","B09MJRLLMG","B09MJRLLMG","B09MJRLLMG","B09MJRLLMG"],
+  ["13","iPhone 13","512GB","Rosa","B09MJRJTZ1","B09MJRJTZ1","B09MJRJTZ1","B09MJRJTZ1"],
+  ["13","iPhone 13","512GB","Rosso","B09MJSY8M7","B09MJSY8M7","B09MJSY8M7","B09MJSY8M7"],
+  ["13","iPhone 13","512GB","Azzurro","B09MJS8CN6","B09MJS8CN6","B09MJS8CN6","B09MJS8CN6"],
+  ["13","iPhone 13","512GB","Verde","B0BBP2259X","B0BBP2259X","B0BBP2259X","B0BBP2259X"],
+  ["13","iPhone 13 Pro","128GB","Argento","B09MJTK6HR","B09MJTK6HR","B09MJTK6HR","B09MJTK6HR"],
+  ["13","iPhone 13 Pro","128GB","Azzurro Sierra","B09MJRCYYB","B09MJRCYYB","B09MJRCYYB","B09MJRCYYB"],
+  ["13","iPhone 13 Pro","128GB","Grafite","B09ML6X61Z","B09ML6X61Z","B09ML6X61Z","B09ML6X61Z"],
+  ["13","iPhone 13 Pro","128GB","Oro","B09MJR298V","B09MJR298V","B09MJR298V","B09MJR298V"],
+  ["13","iPhone 13 Pro","128GB","Verde Alpino","B0BBPFDTNZ","B0BBPFDTNZ","B0BBPFDTNZ","B0BBPFDTNZ"],
+  ["13","iPhone 13 Pro","256GB","Argento","B09MJSVDRF","B09MJSVDRF","B09MJSVDRF","B09MJSVDRF"],
+  ["13","iPhone 13 Pro","256GB","Azzurro Sierra","B09MJS1F6R","B09MJS1F6R","B09MJS1F6R","B09MJS1F6R"],
+  ["13","iPhone 13 Pro","256GB","Grafite","B09MJSNM1L","B09MJSNM1L","B09MJSNM1L","B09MJSNM1L"],
+  ["13","iPhone 13 Pro","256GB","Oro","B09MJRSX7L","B09MJRSX7L","B09MJRSX7L","B09MJRSX7L"],
+  ["13","iPhone 13 Pro","256GB","Verde Alpino","B0BBPKTD5Z","B0BBPKTD5Z","B0BBPKTD5Z","B0BBPKTD5Z"],
+  ["13","iPhone 13 Pro","512GB","Argento","B09MJQFYGK","B09MJQFYGK","B09MJQFYGK","B09MJQFYGK"],
+  ["13","iPhone 13 Pro","512GB","Azzurro Sierra","B09MJSWKCB","B09MJSWKCB","B09MJSWKCB","B09MJSWKCB"],
+  ["13","iPhone 13 Pro","512GB","Grafite","B09MJRZFM7","B09MJRZFM7","B09MJRZFM7","B09MJRZFM7"],
+  ["13","iPhone 13 Pro","512GB","Oro","B09MJTJTMF","B09MJTJTMF","B09MJTJTMF","B09MJTJTMF"],
+  ["13","iPhone 13 Pro","512GB","Verde Alpino","B0BBPLH3GD","B0BBPLH3GD","B0BBPLH3GD","B0BBPLH3GD"],
+  ["13","iPhone 13 Pro","1TB","Argento","B09MJRRJ9T","B09ML79B9K","B09MJRRJ9T","B09MJRRJ9T"],
+  ["13","iPhone 13 Pro","1TB","Azzurro Sierra","B09MJRSKBR","B09MJRSKBR","B09MJRSKBR","B09MJRSKBR"],
+  ["13","iPhone 13 Pro","1TB","Grafite","B09MJSDC8D","B09MJSDC8D","B09MJSDC8D","B09MJSDC8D"],
+  ["13","iPhone 13 Pro","1TB","Oro","B09MJT4WRW","B09MJT4WRW","B09MJT4WRW","B09MJT4WRW"],
+  ["13","iPhone 13 Pro","1TB","Verde Alpino","B0BBPF9FVY","B0BBPF9FVY","B0BBPF9FVY","B0BBPF9FVY"],
+  ["13","iPhone 13 Pro Max","128GB","Argento","B09MJSWN7Z","B09MJSWN7Z","B09MJSWN7Z","B09MJSWN7Z"],
+  ["13","iPhone 13 Pro Max","128GB","Azzurro Sierra","B09MJRVS68","B09MJRVS68","B09MJRVS68","B09MJRVS68"],
+  ["13","iPhone 13 Pro Max","128GB","Grafite","B09ML6BTJV","B09ML6BTJV","B09ML6BTJV","B09ML6BTJV"],
+  ["13","iPhone 13 Pro Max","128GB","Oro","B09ML5CP83","B09ML5CP83","B09ML5CP83","B09ML5CP83"],
+  ["13","iPhone 13 Pro Max","128GB","Verde Alpino","B0BBP48ZTY","B0BBP48ZTY","B0BBP48ZTY","B0BBP48ZTY"],
+  ["13","iPhone 13 Pro Max","256GB","Argento","B09MJSB5FL","B09MJSB5FL","B09MJSB5FL","B09MJSB5FL"],
+  ["13","iPhone 13 Pro Max","256GB","Azzurro Sierra","B09MJRNW1Y","B09MJRNW1Y","B09MJRNW1Y","B09MJRNW1Y"],
+  ["13","iPhone 13 Pro Max","256GB","Grafite","B09ML89FG2","B09ML89FG2","B09ML89FG2","B09ML89FG2"],
+  ["13","iPhone 13 Pro Max","256GB","Oro","B09MJRP7RM","B09MJRP7RM","B09MJRP7RM","B09MJRP7RM"],
+  ["13","iPhone 13 Pro Max","256GB","Verde Alpino","B0BBPPWHX5","B0BBPPWHX5","B0BBPPWHX5","B0BBPPWHX5"],
+  ["13","iPhone 13 Pro Max","512GB","Argento","B09MJR636R","B09MJR636R","B09MJR636R","B09MJR636R"],
+  ["13","iPhone 13 Pro Max","512GB","Azzurro Sierra","B09MJS1XPC","B09MJS1XPC","B09MJS1XPC","B09MJS1XPC"],
+  ["13","iPhone 13 Pro Max","512GB","Grafite","B09MJTW6DP","B09MJTW6DP","B09MJTW6DP","B09MJTW6DP"],
+  ["13","iPhone 13 Pro Max","512GB","Oro","B09MJRKV5F","B09MJRKV5F","B09MJRKV5F","B09MJRKV5F"],
+  ["13","iPhone 13 Pro Max","512GB","Verde Alpino","B0BBQCSXCY","B0BBQCSXCY","B0BBQCSXCY","B0BBQCSXCY"],
+  ["13","iPhone 13 Pro Max","1TB","Argento","B09MJSM7CY","B09MJSM7CY","B09MJSM7CY","B09MJSM7CY"],
+  ["13","iPhone 13 Pro Max","1TB","Azzurro Sierra","B09MJR7GG6","B09MJR7GG6","B09MJR7GG6","B09MJR7GG6"],
+  ["13","iPhone 13 Pro Max","1TB","Grafite","B09MJQHTMG","B09ML7WJS5","B09MJQHTMG","B09MJQHTMG"],
+  ["13","iPhone 13 Pro Max","1TB","Oro","B09MJT4WLX","B09MJT4WLX","B09MJT4WLX","B09MJT4WLX"],
+  ["13","iPhone 13 Pro Max","1TB","Verde Alpino","B0BBP8NH65","B0BBP8NH65","B0BBP8NH65","B0BBP8NH65"],
+  ["14","iPhone 14","128GB","Galassia","B0BNLZ14Z2","B0BNLZ14Z2","B0BNLZ14Z2","B0BNLZ14Z2"],
+  ["14","iPhone 14","128GB","Mezzanotte","B0BNLXKVNQ","B0BNLXKVNQ","B0BNLXKVNQ","B0BNLXKVNQ"],
+  ["14","iPhone 14","128GB","Blu","B0BNLXTK3P","B0BNLXTK3P","B0BNLXTK3P","B0BNLXTK3P"],
+  ["14","iPhone 14","128GB","Viola","B0BNLWNYGL","B0BNLWNYGL","B0BNLWNYGL","B0BNLWNYGL"],
+  ["14","iPhone 14","128GB","Rosso","B0BNLX3333","B0BNLX3333","B0BNLX3333","B0BNLX3333"],
+  ["14","iPhone 14","128GB","Giallo","B0CM6VBWQB","B0CM6VBWQB","B0CM6VBWQB","B0CM6VBWQB"],
+  ["14","iPhone 14","256GB","Galassia","B0BNLXYQWS","B0BNLXYQWS","B0BNLXYQWS","B0BNLXYQWS"],
+  ["14","iPhone 14","256GB","Mezzanotte","B0BNMC5PXS","B0BNMC5PXS","B0BNMC5PXS","B0BNMC5PXS"],
+  ["14","iPhone 14","256GB","Blu","B0BNLVY4R3","B0BNLVY4R3","B0BNLVY4R3","B0BNLVY4R3"],
+  ["14","iPhone 14","256GB","Viola","B0BNLYJGJB","B0BNLYJGJB","B0BNLYJGJB","B0BNLYJGJB"],
+  ["14","iPhone 14","256GB","Rosso","B0BNLYSQ64","B0BNLYSQ64","B0BNLYSQ64","B0BNLYSQ64"],
+  ["14","iPhone 14","256GB","Giallo","B0CM6YMMJB","B0CM6YMMJB","B0CM6YMMJB","B0CM6YMMJB"],
+  ["14","iPhone 14","512GB","Galassia","B0BNLVPZMX","B0BNLVPZMX","B0BNLVPZMX","B0BNLVPZMX"],
+  ["14","iPhone 14","512GB","Mezzanotte","B0BNLXLFJ2","B0BNLXLFJ2","B0BNLXLFJ2","B0BNLXLFJ2"],
+  ["14","iPhone 14","512GB","Blu","B0BNLYQCW9","B0BNLYQCW9","B0BNLYQCW9","B0BNLYQCW9"],
+  ["14","iPhone 14","512GB","Viola","B0BNLX369C","B0BNLX369C","B0BNLX369C","B0BNLX369C"],
+  ["14","iPhone 14","512GB","Rosso","B0BNLVTS23","B0BNLVTS23","B0BNLVTS23","B0BNLVTS23"],
+  ["14","iPhone 14","512GB","Giallo","B0CM798ZN4","B0CM798ZN4","B0CM798ZN4","B0CM798ZN4"],
+  ["14","iPhone 14 Plus","128GB","Galassia","B0BNM29W62","B0BNM29W62","B0BNM29W62","B0BNM29W62"],
+  ["14","iPhone 14 Plus","128GB","Mezzanotte","B0BNMBHM8Z","B0BNMBHM8Z","B0BNMBHM8Z","B0BNMBHM8Z"],
+  ["14","iPhone 14 Plus","128GB","Blu","B0BNM11NY3","B0BNM11NY3","B0BNM11NY3","B0BNM11NY3"],
+  ["14","iPhone 14 Plus","128GB","Viola","B0BNXZKC53","B0BNMC7723","B0BNMC7723","B0BNXZKC53"],
+  ["14","iPhone 14 Plus","128GB","Giallo","B0CM9WN9DF","B0CM9WN9DF","B0CM9WN9DF","B0CM9WN9DF"],
+  ["14","iPhone 14 Plus","128GB","Rosso","B0BNM242JK","B0BNM242JK","B0BNM242JK","B0BNM242JK"],
+  ["14","iPhone 14 Plus","256GB","Galassia","B0BNM2BYL9","B0BNM2BYL9","B0BNM2BYL9","B0BNM2BYL9"],
+  ["14","iPhone 14 Plus","256GB","Mezzanotte","B0BNM1L14Z","B0BNM1L14Z","B0BNM1L14Z","B0BNM1L14Z"],
+  ["14","iPhone 14 Plus","256GB","Blu","B0BNLYYDPY","B0BNLYYDPY","B0BNLYYDPY","B0BNLYYDPY"],
+  ["14","iPhone 14 Plus","256GB","Giallo","B0CM722FN1","B0CM722FN1","B0CM722FN1","B0CM722FN1"],
+  ["14","iPhone 14 Plus","256GB","Rosso","B0BNM11QK6","B0BNM11QK6","B0BNM11QK6","B0BNM11QK6"],
+  ["14","iPhone 14 Plus","256GB","Viola","B0BNM2S7X7","B0BNM2S7X7","B0BNM2S7X7","B0BNM2S7X7"],
+  ["14","iPhone 14 Plus","512GB","Galassia","B0BNM16FW6","B0BNM16FW6","B0BNM16FW6","B0BNM16FW6"],
+  ["14","iPhone 14 Plus","512GB","Mezzanotte","B0BNM1C6LH","B0BNM1C6LH","B0BNM1C6LH","B0BNM1C6LH"],
+  ["14","iPhone 14 Plus","512GB","Blu","B0BNLY657V","B0BNLY657V","B0BNLY657V","B0BNLY657V"],
+  ["14","iPhone 14 Plus","512GB","Giallo","B0CM71PX64","B0CM71PX64","B0CM71PX64","B0CM71PX64"],
+  ["14","iPhone 14 Plus","512GB","Rosso","B0BNLZYY4M","B0BNLZYY4M","B0BNLZYY4M","B0BNLZYY4M"],
+  ["14","iPhone 14 Plus","512GB","Viola","B0BNM1HR7V","B0BNM1HR7V","B0BNM1HR7V","B0BNM1HR7V"],
+  ["14","iPhone 14 Pro","128GB","Nero Siderale","B0BNLZ9G4N","B0BNLZ9G4N","B0BNLZ9G4N","B0BNLZ9G4N"],
+  ["14","iPhone 14 Pro","128GB","Argento","B0BNM1YZXG","B0BNM1YZXG","B0BNM1YZXG","B0BNM1YZXG"],
+  ["14","iPhone 14 Pro","128GB","Oro","B0BNM15X2R","B0BNM15X2R","B0BNM15X2R","B0BNM15X2R"],
+  ["14","iPhone 14 Pro","128GB","Viola Scuro","B0BNLZSY18","B0BNLZSY18","B0BNLZSY18","B0BNLZSY18"],
+  ["14","iPhone 14 Pro","256GB","Nero Siderale","B0BNLYT3ML","B0BNLYT3ML","B0BNLYT3ML","B0BNLYT3ML"],
+  ["14","iPhone 14 Pro","256GB","Argento","B0BNM188FY","B0BNM188FY","B0BNM188FY","B0BNM188FY"],
+  ["14","iPhone 14 Pro","256GB","Oro","B0BNMC76TQ","B0BNMC76TQ","B0BNMC76TQ","B0BNMC76TQ"],
+  ["14","iPhone 14 Pro","256GB","Viola Scuro","B0BNM1R46Q","B0BNM1R46Q","B0BNM1R46Q","B0BNM1R46Q"],
+  ["14","iPhone 14 Pro","512GB","Nero Siderale","B0BNM1N3C3","B0BNM1N3C3","B0BNM1N3C3","B0BNM1N3C3"],
+  ["14","iPhone 14 Pro","512GB","Argento","B0BNM2KVHP","B0BNM2KVHP","B0BNM2KVHP","B0BNM2KVHP"],
+  ["14","iPhone 14 Pro","512GB","Oro","B0BNLZLX3G","B0BNLZLX3G","B0BNLZLX3G","B0BNLZLX3G"],
+  ["14","iPhone 14 Pro","512GB","Viola Scuro","B0BNM2GZ23","B0BNM2GZ23","B0BNM2GZ23","B0BNM2GZ23"],
+  ["14","iPhone 14 Pro","1TB","Nero Siderale","B0BNLZMT75","B0BNLZMT75","B0BNLZMT75","B0BNLZMT75"],
+  ["14","iPhone 14 Pro","1TB","Argento","B0BNLY2YGK","B0BNLY2YGK","B0BNLY2YGK","B0BNLY2YGK"],
+  ["14","iPhone 14 Pro","1TB","Oro","B0BNM1CH8J","B0BNM1CH8J","B0BNM1CH8J","B0BNM1CH8J"],
+  ["14","iPhone 14 Pro","1TB","Viola Scuro","B0BNLZZNLD","B0BNLZZNLD","B0BNLZZNLD","B0BNLZZNLD"],
+  ["14","iPhone 14 Pro Max","128GB","Nero Siderale","B0BNLZCPZ3","B0BNLZCPZ3","B0BNLZCPZ3","B0BNLZCPZ3"],
+  ["14","iPhone 14 Pro Max","128GB","Argento","B0BNM1ZM4H","B0BNM1ZM4H","B0BNM1ZM4H","B0BNM1ZM4H"],
+  ["14","iPhone 14 Pro Max","128GB","Oro","B0BNM1N1J4","B0BNM1N1J4","B0BNM1N1J4","B0BNM1N1J4"],
+  ["14","iPhone 14 Pro Max","128GB","Viola Scuro","B0BNM1M33W","B0BNM1M33W","B0BNM1M33W","B0BNM1M33W"],
+  ["14","iPhone 14 Pro Max","256GB","Nero Siderale","B0BNLYYK2X","B0BNLYYK2X","B0BNLYYK2X","B0BNLYYK2X"],
+  ["14","iPhone 14 Pro Max","256GB","Argento","B0BNM2MNJK","B0BNM2MNJK","B0BNM2MNJK","B0BNM2MNJK"],
+  ["14","iPhone 14 Pro Max","256GB","Oro","B0BNM2DPDP","B0BNM2DPDP","B0BNM2DPDP","B0BNM2DPDP"],
+  ["14","iPhone 14 Pro Max","256GB","Viola Scuro","B0BNM1RSW8","B0BNM1RSW8","B0BNM1RSW8","B0BNM1RSW8"],
+  ["14","iPhone 14 Pro Max","512GB","Nero Siderale","B0BNM1ZNK3","B0BNM1ZNK3","B0BNM1ZNK3","B0BNM1ZNK3"],
+  ["14","iPhone 14 Pro Max","512GB","Argento","B0BNM2ZBG8","B0BNM2ZBG8","B0BNM2ZBG8","B0BNM2ZBG8"],
+  ["14","iPhone 14 Pro Max","512GB","Oro","B0BNM3Q8J4","B0BNM3Q8J4","B0BNM3Q8J4","B0BNM3Q8J4"],
+  ["14","iPhone 14 Pro Max","512GB","Viola Scuro","B0BNM1YW1B","B0BNM1YW1B","B0BNM1YW1B","B0BNM1YW1B"],
+  ["14","iPhone 14 Pro Max","1TB","Nero Siderale","B0BNLZCFSD","B0BNLZCFSD","B0BNLZCFSD","B0BNLZCFSD"],
+  ["14","iPhone 14 Pro Max","1TB","Argento","B0BNM45JNF","B0BNM45JNF","B0BNM45JNF","B0BNM45JNF"],
+  ["14","iPhone 14 Pro Max","1TB","Oro","B0BNM1RCLY","B0BNM1RCLY","B0BNM1RCLY","B0BNM1RCLY"],
+  ["14","iPhone 14 Pro Max","1TB","Viola Scuro","B0BNM1GXCJ","B0BNM1GXCJ","B0BNM1GXCJ","B0BNM1GXCJ"],
+  ["15","iPhone 15","128GB","Nero","B0CVJ23L79","B0CVJ23L79","B0CVJ23L79","B0CVJ23L79"],
+  ["15","iPhone 15","128GB","Giallo","B0CVJ8716B","B0CVJ8716B","B0CVJ8716B","B0CVJ8716B"],
+  ["15","iPhone 15","128GB","Rosa","B0CW114X7P","B0CW114X7P","B0CW114X7P","B0CW114X7P"],
+  ["15","iPhone 15","128GB","Verde","B0CVJ6F58F","B0CVJ6F58F","B0CVJ6F58F","B0CVJ6F58F"],
+  ["15","iPhone 15","128GB","Azzurro","B0CVJ5FCK9","B0CVJ5FCK9","B0CVJ5FCK9","B0CVJ5FCK9"],
+  ["15","iPhone 15","256GB","Nero","B0CVJ7H584","B0CVJ7H584","B0CVJ7H584","B0CVJ7H584"],
+  ["15","iPhone 15","256GB","Giallo","B0CVJ1FMHF","B0CVJ1FMHF","B0CVJ1FMHF","B0CVJ1FMHF"],
+  ["15","iPhone 15","256GB","Rosa","B0CVJ3GSMR","B0CVJ3GSMR","B0CVJ3GSMR","B0CVJ3GSMR"],
+  ["15","iPhone 15","256GB","Verde","B0CVJB28W2","B0CVJB28W2","B0CVJB28W2","B0CVJB28W2"],
+  ["15","iPhone 15","256GB","Azzurro","B0CVJ7H5BD","B0CVJ7H5BD","B0CVJ7H5BD","B0CVJ7H5BD"],
+  ["15","iPhone 15","512GB","Nero","B0CVJ247SC","B0CVJ247SC","B0CVJ247SC","B0CVJ247SC"],
+  ["15","iPhone 15","512GB","Giallo","B0CVHYJ15L","B0CVHYJ15L","B0CVHYJ15L","B0CVHYJ15L"],
+  ["15","iPhone 15","512GB","Blu","B0CVJ3DFXJ","B0CVJ3DFXJ","B0CVJ3DFXJ","B0CVJ3DFXJ"],
+  ["15","iPhone 15","512GB","Rosa","B0CVJ1RZLN","B0CVJ1RZLN","B0CVJ1RZLN","B0CVJ1RZLN"],
+  ["15","iPhone 15","512GB","Verde","B0CVJ2KLPH","B0CVJ2KLPH","B0CVJ2KLPH","B0CVJ2KLPH"],
+  ["15","iPhone 15 Plus","128GB","Nero","B0CVJSMQBB","B0CVJSMQBB","B0CVJSMQBB","B0CVJSMQBB"],
+  ["15","iPhone 15 Plus","128GB","Giallo","B0CVJWGXT8","B0CVJWGXT8","B0CVJWGXT8","B0CVJWGXT8"],
+  ["15","iPhone 15 Plus","128GB","Rosa","B0CVJPFD1Y","B0CVJPFD1Y","B0CVJPFD1Y","B0CVJPFD1Y"],
+  ["15","iPhone 15 Plus","128GB","Verde","B0CVJVHPGN","B0CVJVHPGN","B0CVJVHPGN","B0CVJVHPGN"],
+  ["15","iPhone 15 Plus","128GB","Blu","B0CVK3V88F","B0CVK3V88F","B0CVK3V88F","B0CVK3V88F"],
+  ["15","iPhone 15 Plus","256GB","Nero","B0CVJSHFZ8","B0CVJSHFZ8","B0CVJSHFZ8","B0CVJSHFZ8"],
+  ["15","iPhone 15 Plus","256GB","Giallo","B0CVJZHTVV","B0CVJZHTVV","B0CVJZHTVV","B0CVJZHTVV"],
+  ["15","iPhone 15 Plus","256GB","Blu","B0CVJYMWFL","B0CVJYMWFL","B0CVJYMWFL","B0CVJYMWFL"],
+  ["15","iPhone 15 Plus","256GB","Rosa","B0CVJW1B51","B0CVJW1B51","B0CVJW1B51","B0CVJW1B51"],
+  ["15","iPhone 15 Plus","256GB","Verde","B0CVJTZPFV","B0CVJTZPFV","B0CVJTZPFV","B0CVJTZPFV"],
+  ["15","iPhone 15 Pro","128GB","Titanio Nero","B0CVJ2RLP5","B0CVJ2RLP5","B0CVJ2RLP5","B0CVJ2RLP5"],
+  ["15","iPhone 15 Pro","128GB","Titanio Bianco","B0CVK2P46H","B0CVK2P46H","B0CVK2P46H","B0CVK2P46H"],
+  ["15","iPhone 15 Pro","128GB","Titanio Blu","B0CVJ5WF3K","B0CVJ5WF3K","B0CVJ5WF3K","B0CVJ5WF3K"],
+  ["15","iPhone 15 Pro","128GB","Titanio Naturale","B0CVJ8QRF6","B0CVJ8QRF6","B0CVJ8QRF6","B0CVJ8QRF6"],
+  ["15","iPhone 15 Pro","256GB","Titanio Nero","B0CVJVJNQS","B0CVJVJNQS","B0CVJVJNQS","B0CVJVJNQS"],
+  ["15","iPhone 15 Pro","256GB","Titanio Bianco","B0CVJXXPFL","B0CVJXXPFL","B0CVJXXPFL","B0CVJXXPFL"],
+  ["15","iPhone 15 Pro","256GB","Titanio Blu","B0CVK3WMT3","B0CVK3WMT3","B0CVK3WMT3","B0CVK3WMT3"],
+  ["15","iPhone 15 Pro","256GB","Titanio Naturale","B0CVJS2V8B","B0CVJS2V8B","B0CVJS2V8B","B0CVJS2V8B"],
+  ["15","iPhone 15 Pro","512GB","Titanio Nero","B0CVJNXTBM","B0CVJNXTBM","B0CVJNXTBM","B0CVJNXTBM"],
+  ["15","iPhone 15 Pro","512GB","Titanio Bianco","B0CVJWZFNR","B0CVJWZFNR","B0CVJWZFNR","B0CVJWZFNR"],
+  ["15","iPhone 15 Pro","512GB","Titanio Blu","B0CVK2DLV4","B0CVK2DLV4","B0CVK2DLV4","B0CVK2DLV4"],
+  ["15","iPhone 15 Pro","512GB","Titanio Naturale","B0CVJPFCW5","B0CVJPFCW5","B0CVJPFCW5","B0CVJPFCW5"],
+  ["15","iPhone 15 Pro","1TB","Titanio Nero","B0CVZS8NP5","B0CVZS8NP5","B0CVZS8NP5","B0CVZS8NP5"],
+  ["15","iPhone 15 Pro","1TB","Titanio Bianco","B0CVZW9P4X","B0CVZW9P4X","B0CVZW9P4X","B0CVZW9P4X"],
+  ["15","iPhone 15 Pro","1TB","Titanio Blu","B0CVZWMH9D","B0CVZWMH9D","B0CVZWMH9D","B0CVZWMH9D"],
+  ["15","iPhone 15 Pro","1TB","Titanio Naturale","B0CVZT7Q1D","B0CVZT7Q1D","B0CVZT7Q1D","B0CVZT7Q1D"],
+  ["15","iPhone 15 Pro Max","256GB","Titanio Nero","B0CVJXGPG4","B0CVJXGPG4","B0CVJXGPG4","B0CVJXGPG4"],
+  ["15","iPhone 15 Pro Max","256GB","Titanio Bianco","B0CVJZZQL5","B0CVJZZQL5","B0CVJZZQL5","B0CVJZZQL5"],
+  ["15","iPhone 15 Pro Max","256GB","Titanio Blu","B0CVJP3HXV","B0CVJP3HXV","B0CVJP3HXV","B0CVJP3HXV"],
+  ["15","iPhone 15 Pro Max","256GB","Titanio Naturale","B0CVJT3MH6","B0CVJT3MH6","B0CVJT3MH6","B0CVJT3MH6"],
+  ["15","iPhone 15 Pro Max","512GB","Titanio Nero","B0CVJVM1DH","B0CVJVM1DH","B0CVJVM1DH","B0CVJVM1DH"],
+  ["15","iPhone 15 Pro Max","512GB","Titanio Bianco","B0CVJXGPG5","B0CVJXGPG5","B0CVJXGPG5","B0CVJXGPG5"],
+  ["15","iPhone 15 Pro Max","512GB","Titanio Blu","B0CVJYNK4J","B0CVJYNK4J","B0CVJYNK4J","B0CVJYNK4J"],
+  ["15","iPhone 15 Pro Max","1TB","Titanio Nero","B0CW15R8JR","B0CW15R8JR","B0CW15R8JR","B0CW15R8JR"],
+  ["15","iPhone 15 Pro Max","1TB","Titanio Bianco","B0CVZMX2TB","B0CVZMX2TB","B0CVZMX2TB","B0CVZMX2TB"],
+  ["15","iPhone 15 Pro Max","1TB","Titanio Blu","B0CVZTDVTV","B0CVZTDVTV","B0CVZTDVTV","B0CVZTDVTV"],
+  ["15","iPhone 15 Pro Max","1TB","Titanio Naturale","B0CVZT43RH","B0CVZT43RH","B0CVZT43RH","B0CVZT43RH"],
+  ["16","iPhone 16","128GB","Nero","B0DHYF5TVV","B0DHYF5TVV","B0DHYF5TVV","B0DHYF5TVV"],
+  ["16","iPhone 16","128GB","Bianco","B0DHYG26HH","B0DHYG26HH","B0DHYG26HH","B0DHYG26HH"],
+  ["16","iPhone 16","128GB","Oltremare","B0DHYFNJ5X","B0DHYFNJ5X","B0DHYFNJ5X","B0DHYFNJ5X"],
+  ["16","iPhone 16","128GB","Rosa","B0DHYDVWKC","B0DHYDVWKC","B0DHYDVWKC","B0DHYDVWKC"],
+  ["16","iPhone 16","128GB","Verde","B0DHYDGHF5","B0DHYDGHF5","B0DHYDGHF5","B0DHYDGHF5"],
+  ["16","iPhone 16","256GB","Nero","B0DHYF6Z92","B0DHYF6Z92","B0DHYF6Z92","B0DHYF6Z92"],
+  ["16","iPhone 16","256GB","Bianco","B0DHYDPQHN","B0DHYDPQHN","B0DHYDPQHN","B0DHYDPQHN"],
+  ["16","iPhone 16","256GB","Oltremare","B0DHYDYF26","B0DHYDYF26","B0DHYDYF26","B0DHYDYF26"],
+  ["16","iPhone 16","256GB","Rosa","B0DHYB6ZTT","B0DHYB6ZTT","B0DHYB6ZTT","B0DHYB6ZTT"],
+  ["16","iPhone 16","256GB","Verde","B0DHYCBFWG","B0DHYCBFWG","B0DHYCBFWG","B0DHYCBFWG"],
+  ["16","iPhone 16","512GB","Nero","B0DHYBQCTV","B0DHYBQCTV","B0DHYBQCTV","B0DHYBQCTV"],
+  ["16","iPhone 16","512GB","Bianco","B0DHYFXNC9","B0DHYFXNC9","B0DHYFXNC9","B0DHYFXNC9"],
+  ["16","iPhone 16","512GB","Oltremare","B0DHYFYKV7","B0DHYFYKV7","B0DHYFYKV7","B0DHYFYKV7"],
+  ["16","iPhone 16","512GB","Rosa","B0DHYCXQRY","B0DHYCXQRY","B0DHYCXQRY","B0DHYCXQRY"],
+  ["16","iPhone 16","512GB","Verde","B0DHYFT51J","B0DHYFT51J","B0DHYFT51J","B0DHYFT51J"],
+  ["16","iPhone 16 Plus","128GB","Nero","B0DHYFRN36","B0DHYFRN36","B0DHYFRN36","B0DHYFRN36"],
+  ["16","iPhone 16 Plus","128GB","Bianco","B0DHYG1D3V","B0DHYG1D3V","B0DHYG1D3V","B0DHYG1D3V"],
+  ["16","iPhone 16 Plus","128GB","Oltremare","B0DHYDDD7L","B0DHYDDD7L","B0DHYDDD7L","B0DHYDDD7L"],
+  ["16","iPhone 16 Plus","128GB","Rosa","B0DHYFH32H","B0DHYFH32H","B0DHYFH32H","B0DHYFH32H"],
+  ["16","iPhone 16 Plus","128GB","Verde","B0DHYDX5M1","B0DHYDX5M1","B0DHYDX5M1","B0DHYDX5M1"],
+  ["16","iPhone 16 Plus","256GB","Nero","B0DHYFG675","B0DHYFG675","B0DHYFG675","B0DHYFG675"],
+  ["16","iPhone 16 Plus","256GB","Bianco","B0DHYGNXNQ","B0DHYGNXNQ","B0DHYGNXNQ","B0DHYGNXNQ"],
+  ["16","iPhone 16 Plus","256GB","Oltremare","B0DHYFTSL2","B0DHYFTSL2","B0DHYFTSL2","B0DHYFTSL2"],
+  ["16","iPhone 16 Plus","256GB","Rosa","B0DHYF7H8R","B0DHYF7H8R","B0DHYF7H8R","B0DHYF7H8R"],
+  ["16","iPhone 16 Plus","256GB","Verde","B0DHYFBQCK","B0DHYFBQCK","B0DHYFBQCK","B0DHYFBQCK"],
+  ["16","iPhone 16 Plus","512GB","Nero","B0DHYD6JVY","B0DHYD6JVY","B0DHYD6JVY","B0DHYD6JVY"],
+  ["16","iPhone 16 Plus","512GB","Bianco","","B0DHYG53M9","",""],
+  ["16","iPhone 16 Plus","512GB","Rosa","","B0DHYDB5WF","",""],
+  ["16","iPhone 16 Plus","512GB","Verde","B0DHYGMX7Q","B0DHYGMX7Q","B0DHYGMX7Q","B0DHYGMX7Q"],
+  ["16","iPhone 16 Plus","512GB","Oltremare","B0DHYDLDPS","B0DHYDLDPS","B0DHYDLDPS","B0DHYDLDPS"],
+  ["16","iPhone 16 Pro","128GB","Titanio Nero","B0DHYDBXJ9","B0DHYDBXJ9","B0DHYDBXJ9","B0DHYDBXJ9"],
+  ["16","iPhone 16 Pro","128GB","Titanio Bianco","B0DHYDJJP7","B0DHYDJJP7","B0DHYDJJP7","B0DHYDJJP7"],
+  ["16","iPhone 16 Pro","128GB","Titanio Sabbia","B0DHYF2KQG","B0DHYF2KQG","B0DHYF2KQG","B0DHYF2KQG"],
+  ["16","iPhone 16 Pro","128GB","Titanio Natural","B0DHYFYZ5K","B0DHYFYZ5K","B0DHYFYZ5K","B0DHYFYZ5K"],
+  ["16","iPhone 16 Pro","256GB","Titanio Nero","B0DHYDMJ1W","B0DHYDMJ1W","B0DHYDMJ1W","B0DHYDMJ1W"],
+  ["16","iPhone 16 Pro","256GB","Titanio Bianco","B0DHYDRY69","B0DHYDRY69","B0DHYDRY69","B0DHYDRY69"],
+  ["16","iPhone 16 Pro","256GB","Titanio Sabbia","B0DHYD679P","B0DHYD679P","B0DHYD679P","B0DHYD679P"],
+  ["16","iPhone 16 Pro","256GB","Titanio Natural","B0DHYD5ZWJ","B0DHYD5ZWJ","B0DHYD5ZWJ","B0DHYD5ZWJ"],
+  ["16","iPhone 16 Pro","512GB","Titanio Nero","B0DHYG9G2C","B0DHYG9G2C","B0DHYG9G2C","B0DHYG9G2C"],
+  ["16","iPhone 16 Pro","512GB","Titanio Bianco","B0DHYF4DMY","B0DHYF4DMY","B0DHYF4DMY","B0DHYF4DMY"],
+  ["16","iPhone 16 Pro","512GB","Titanio Sabbia","B0DHYH7NLZ","B0DHYH7NLZ","B0DHYH7NLZ","B0DHYH7NLZ"],
+  ["16","iPhone 16 Pro","512GB","Titanio Natural","B0DHYDFHH9","B0DHYDFHH9","B0DHYDFHH9","B0DHYDFHH9"],
+  ["16","iPhone 16 Pro","1TB","Titanio Nero","B0DHYDTQ7T","B0DHYDTQ7T","B0DHYDTQ7T","B0DHYDTQ7T"],
+  ["16","iPhone 16 Pro","1TB","Titanio Bianco","B0DHYDXPC7","B0DHYDXPC7","B0DHYDXPC7","B0DHYDXPC7"],
+  ["16","iPhone 16 Pro","1TB","Titanio Sabbia","B0DHYCXZB7","B0DHYCXZB7","B0DHYCXZB7","B0DHYCXZB7"],
+  ["16","iPhone 16 Pro","1TB","Titanio Natural","B0DHYDYX3Y","B0DHYDYX3Y","B0DHYDYX3Y","B0DHYDYX3Y"],
+  ["16","iPhone 16 Pro Max","256GB","Titanio Nero","B0DHYCQZC4","B0DHYCQZC4","B0DHYCQZC4","B0DHYCQZC4"],
+  ["16","iPhone 16 Pro Max","256GB","Titanio Bianco","B0DHYC98ML","B0DHYC98ML","B0DHYC98ML","B0DHYC98ML"],
+  ["16","iPhone 16 Pro Max","256GB","Titanio Sabbia","B0DHYF7JW3","B0DHYF7JW3","B0DHYF7JW3","B0DHYF7JW3"],
+  ["16","iPhone 16 Pro Max","256GB","Titanio Natural","B0DHYF3FKR","B0DHYF3FKR","B0DHYF3FKR","B0DHYF3FKR"],
+  ["16","iPhone 16 Pro Max","512GB","Titanio Nero","B0DHYCLJCV","B0DHYCLJCV","B0DHYCLJCV","B0DHYCLJCV"],
+  ["16","iPhone 16 Pro Max","512GB","Titanio Bianco","B0DHYF3MPJ","B0DHYF3MPJ","B0DHYF3MPJ","B0DHYF3MPJ"],
+  ["16","iPhone 16 Pro Max","512GB","Titanio Sabbia","B0DHYFK7Z5","B0DHYFK7Z5","B0DHYFK7Z5","B0DHYFK7Z5"],
+  ["16","iPhone 16 Pro Max","512GB","Titanio Natural","B0DHYFNPQB","B0DHYFNPQB","B0DHYFNPQB","B0DHYFNPQB"],
+  ["16","iPhone 16 Pro Max","1TB","Titanio Nero","B0DHYF6H1P","B0DHYF6H1P","B0DHYF6H1P","B0DHYF6H1P"],
+  ["16","iPhone 16 Pro Max","1TB","Titanio Bianco","B0DHYCQ3G6","","B0DHYCQ3G6","B0DHYCQ3G6"],
+  ["16","iPhone 16 Pro Max","1TB","Titanio Sabbia","B0DHYFRH8W","B0DHYFRH8W","B0DHYFRH8W","B0DHYFRH8W"],
+  ["16","iPhone 16 Pro Max","1TB","Titanio Natural","B0DHYDJMLV","B0DHYDJMLV","B0DHYDJMLV","B0DHYDJMLV"]
+];
+
+const MARKETS = [
+  {id:"IT", domain:"8", flag:"🇮🇹", name:"Amazon.it", url:"https://www.amazon.it/dp/", idx:4, zip:"20100"},
+  {id:"DE", domain:"3", flag:"🇩🇪", name:"Amazon.de", url:"https://www.amazon.de/dp/", idx:5, zip:"10115"},
+  {id:"FR", domain:"4", flag:"🇫🇷", name:"Amazon.fr", url:"https://www.amazon.fr/dp/", idx:6, zip:"75001"},
+  {id:"ES", domain:"9", flag:"🇪🇸", name:"Amazon.es", url:"https://www.amazon.es/dp/", idx:7, zip:"28001"},
+];
+
+function unique(arr) { return [...new Set(arr)]; }
+
+function updateModels() {
+  const s = document.getElementById("sel-series").value;
+  const rows = CATALOG.filter(r=>r[0]===s);
+  const sel = document.getElementById("sel-model");
+  sel.innerHTML = '<option value="">— Modello —</option>' + unique(rows.map(r=>r[1])).map(m=>`<option>${m}</option>`).join("");
+  sel.disabled = false;
+  document.getElementById("sel-storage").innerHTML = '<option value="">— Storage —</option>';
+  document.getElementById("sel-storage").disabled = true;
+  document.getElementById("sel-color").innerHTML = '<option value="">— Colore —</option>';
+  document.getElementById("sel-color").disabled = true;
+  clearASIN();
+}
+function updateStorage() {
+  const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value;
+  const rows=CATALOG.filter(r=>r[0]===s&&r[1]===m);
+  const sel=document.getElementById("sel-storage");
+  sel.innerHTML='<option value="">— Storage —</option>'+unique(rows.map(r=>r[2])).map(x=>`<option>${x}</option>`).join("");
+  sel.disabled=false;
+  document.getElementById("sel-color").innerHTML='<option value="">— Colore —</option>';
+  document.getElementById("sel-color").disabled=true;
+  clearASIN();
+}
+function updateColors() {
+  const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value, st=document.getElementById("sel-storage").value;
+  const rows=CATALOG.filter(r=>r[0]===s&&r[1]===m&&r[2]===st);
+  const sel=document.getElementById("sel-color");
+  sel.innerHTML='<option value="">— Colore —</option>'+unique(rows.map(r=>r[3])).map(c=>`<option>${c}</option>`).join("");
+  sel.disabled=false;
+  clearASIN();
+}
+function updateASINs() {
+  const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value;
+  const st=document.getElementById("sel-storage").value, c=document.getElementById("sel-color").value;
+  const row=CATALOG.find(r=>r[0]===s&&r[1]===m&&r[2]===st&&r[3]===c);
+  const input=document.getElementById("asin-input");
+  const status=document.getElementById("asin-status");
+  if (row) {
+    const asin=row[4]||"";
+    input.value=asin;
+    if (asin) { input.className="mono asin-found"; status.className="asin-status found"; status.textContent="✓ ASIN trovato"; }
+    else { input.className="mono asin-missing"; status.className="asin-status missing"; status.textContent="⚠ ASIN non ancora inserito"; }
+  } else { clearASIN(); }
+}
+function clearASIN() {
+  document.getElementById("asin-input").value="";
+  document.getElementById("asin-input").className="mono";
+  document.getElementById("asin-status").textContent="";
+}
+
+// Margine netto IVA a margine Art.36 - Recover (Amazon)
+function calcMargin(buyPrice, sellPrice) {
+  if (!buyPrice || !sellPrice || sellPrice <= 0) return null;
+  const commission = sellPrice * 0.073 + 15;
+  const ivaMargin = (sellPrice - buyPrice) * 22 / 122;
+  return sellPrice - buyPrice - commission - ivaMargin;
+}
+function fmtMargin(net) {
+  if (net === null) return '<span class="price-val na">—</span>';
+  const color = net >= 0 ? 'var(--success)' : 'var(--danger)';
+  return `<span style="font-weight:700;color:${color}">€${net.toFixed(0)}</span>`;
+}
+
+// Badge feedback seller (basato su % positive)
+function feedbackBadge(pct) {
+  if (pct === null || pct === undefined) return '';
+  let cls = 'bad';
+  if (pct >= 90) cls = 'good';
+  else if (pct >= 70) cls = 'mid';
+  return `<span class="feedback-badge ${cls}">${pct}%</span>`;
+}
+
+// Render cella Buy Box (Featured ufficiale Amazon, prezzo + seller + badge FBA)
+function buildBuyBoxCell(data) {
+  const featured = data.excellent;
+  if (!featured || !featured.available || !featured.price) {
+    return `<div class="price-block">
+      <span class="price-val na" style="font-size:0.85rem;">— Assente</span>
+      <div class="seller-line" style="color:#8890aa;font-size:9px;">Nessuna Buy Box Eccellente</div>
+    </div>`;
+  }
+  const fbaBadge = featured.isFBA
+    ? '<span style="display:inline-block;background:rgba(79,142,247,0.18);color:#4f8ef7;font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:5px;vertical-align:middle;letter-spacing:0.3px;">PRIME FBA</span>'
+    : '';
+  return `<div class="price-block">
+    <span class="price-val">€${featured.price.toFixed(2)}</span>${fbaBadge}
+    <div class="seller-line">${featured.seller || '?'}</div>
+  </div>`;
+}
+
+// Render cella Eccellente: MIN reale + spedizione + apparente + Recover position
+function buildExcellentCell(data) {
+  const minReal = data.excellentMinReal;
+  const recover = data.recoverPosition;
+  const hasMinReal = minReal && minReal.available && minReal.totalPrice;
+
+  let html = '<div class="price-block">';
+
+  if (hasMinReal) {
+    const minTotal = minReal.totalPrice;
+    html += `<div class="price-line">
+      <span class="price-val" data-val="${minTotal}">€${minTotal.toFixed(2)}</span>
+      ${feedbackBadge(minReal.positivePercent)}
+    </div>
+    <div class="seller-line">${minReal.seller || '?'} · ${minReal.count} offert${minReal.count===1?'a':'e'}</div>`;
+
+    // Spedizione: se gratuita riga semplice verde, se a pagamento riquadro con dettaglio calcolo
+    if (minReal.deliveryFee === 0) {
+      html += '<div style="font-size:10px;color:#48bb78;margin-top:2px;">📦 Spedizione gratuita</div>';
+    } else if (minReal.deliveryFee > 0) {
+      html += `<div style="margin-top:6px;padding:5px 7px;background:rgba(245,158,11,0.08);border-left:2px solid #f59e0b;border-radius:3px;font-size:10px;line-height:1.4;">
+        <div style="color:#f59e0b;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;">📦 Prezzo con spedizione</div>
+        <div style="color:#e8eaf0;margin-top:2px;">€${minReal.price.toFixed(2)} + €${minReal.deliveryFee.toFixed(2)} sped. = <strong>€${minReal.totalPrice.toFixed(2)}</strong></div>
+        <div style="color:#8890aa;font-size:9px;">${minReal.seller || '?'} ${feedbackBadge(minReal.positivePercent)}</div>
+      </div>`;
+    }
+  } else {
+    html += `<span class="price-val na">—</span>
+    <div class="seller-line"><span class="opp-badge">Nessuna offerta Eccellente</span></div>`;
+  }
+
+  // Warning MIN apparente
+  if (hasMinReal && minReal.apparentMin) {
+    const app = minReal.apparentMin;
+    html += `<div style="margin-top:6px;padding:5px 7px;background:rgba(245,158,11,0.08);border-left:2px solid #f59e0b;border-radius:3px;font-size:10px;line-height:1.4;">
+      <div style="color:#f59e0b;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;">⚠ Apparente più basso</div>
+      <div style="color:#e8eaf0;margin-top:2px;">€${app.price.toFixed(2)} + €${app.deliveryFee.toFixed(2)} sped. = <strong>€${app.totalPrice.toFixed(2)}</strong></div>
+      <div style="color:#8890aa;font-size:9px;">${app.seller || '?'} ${feedbackBadge(app.positivePercent)}</div>
+    </div>`;
+  }
+
+  // Box Recover con suggerimento prezzo
+  if (recover && recover.inList) {
+    if (recover.isLowest && recover.ceilingPrice !== null) {
+      // Caso 1: Recover è il più basso, c'è un prossimo competitor → suggerimento alza
+      html += `<div style="margin-top:8px;padding:8px 10px;background:rgba(72,187,120,0.10);border-left:3px solid #48bb78;border-radius:4px;font-size:11px;line-height:1.6;">
+        <div style="color:#48bb78;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px;">🎯 Recover è il più basso</div>
+        <div style="display:flex;justify-content:space-between;color:#e8eaf0;">
+          <span>Tuo prezzo:</span><strong>€${recover.price.toFixed(2)}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;color:#e8eaf0;">
+          <span>Prossimo (${recover.nextSeller || '?'}):</span><strong>€${recover.nextPrice.toFixed(2)}</strong>
+        </div>
+        <div style="margin-top:6px;padding-top:5px;border-top:1px solid rgba(72,187,120,0.3);color:#48bb78;font-weight:700;">
+          ↗ Alza fino a €${recover.ceilingPrice.toFixed(2)} (+€${recover.priceGain.toFixed(2)})
+        </div>
+      </div>`;
+    } else if (recover.isLowest) {
+      // Caso 2: Recover unico Excellent, nessun competitor
+      html += `<div style="margin-top:8px;padding:8px 10px;background:rgba(72,187,120,0.10);border-left:3px solid #48bb78;border-radius:4px;font-size:11px;line-height:1.5;">
+        <div style="color:#48bb78;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;">🎯 Recover unico Eccellente</div>
+        <div style="color:#e8eaf0;margin-top:3px;">Tuo prezzo: <strong>€${recover.price.toFixed(2)}</strong> · Nessun competitor Eccellente · libertà di pricing</div>
+      </div>`;
+    } else if (recover.tiedLowest) {
+      // Caso 2-bis: Recover è il più basso ma ALLA PARI con un competitor → già competitivo, non alzare
+      html += `<div style="margin-top:8px;padding:8px 10px;background:rgba(72,187,120,0.10);border-left:3px solid #48bb78;border-radius:4px;font-size:11px;line-height:1.6;">
+        <div style="color:#48bb78;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px;">🎯 Recover è il più basso (alla pari)</div>
+        <div style="display:flex;justify-content:space-between;color:#e8eaf0;">
+          <span>Tuo prezzo:</span><strong>€${recover.price.toFixed(2)}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;color:#e8eaf0;">
+          <span>Stesso prezzo (${recover.tiedSeller || '?'}):</span><strong>€${recover.nextPrice.toFixed(2)}</strong>
+        </div>
+        <div style="margin-top:6px;padding-top:5px;border-top:1px solid rgba(72,187,120,0.3);color:#48bb78;font-weight:700;">
+          ✓ Già competitivo — non alzare
+        </div>
+      </div>`;
+    } else {
+      // Caso 3: Recover in lista ma non è il #1
+      html += `<div style="margin-top:8px;padding:8px 10px;background:rgba(245,158,11,0.10);border-left:3px solid #f59e0b;border-radius:4px;font-size:11px;line-height:1.5;">
+        <div style="color:#f59e0b;font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;">📌 Recover #${recover.rank}</div>
+        <div style="color:#e8eaf0;margin-top:3px;">Tuo prezzo: <strong>€${recover.price.toFixed(2)}</strong> (${recover.condition})</div>
+      </div>`;
+    }
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// ─── AMAZON SCAN (singolo ASIN, tutti i mercati) ─────────────────────────────
+async function fetchScanASIN(asin, domain) {
+  const r = await fetch(`/api/scan-asin?asin=${encodeURIComponent(asin)}&domain=${domain}`);
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+
+async function doSearch() {
+  const asin=document.getElementById("asin-input").value.trim().toUpperCase();
+  const btn=document.getElementById("search-btn");
+  const lbl=document.getElementById("btn-label");
+  const spin=document.getElementById("spinner");
+  const result=document.getElementById("result");
+  if (!asin) { alert("Inserisci un ASIN"); return; }
+
+  const s=document.getElementById("sel-series").value, m=document.getElementById("sel-model").value;
+  const st=document.getElementById("sel-storage").value, c=document.getElementById("sel-color").value;
+  const row=CATALOG.find(r=>r[0]===s&&r[1]===m&&r[2]===st&&r[3]===c);
+
+  btn.disabled=true; lbl.style.display="none"; spin.style.display="block";
+  result.style.display="none"; result.innerHTML="";
+
+  const tableRows = MARKETS.map(mkt=>{
+    const mktAsin = row ? (row[mkt.idx]||asin) : asin;
+    return `<tr id="row-${mkt.id}">
+      <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
+      <td><span class="scanning-cell">⟳ ...</span></td>
+      <td><span class="scanning-cell">⟳ ...</span></td>
+      <td><span class="scanning-cell">⟳ ...</span></td>
+      <td><span class="scanning-cell">⟳ ...</span></td>
+      <td>
+        <a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a>
+        <div style="font-size:9px;color:#8890aa;margin-top:3px;">CAP locale: <strong style="color:#e8eaf0;">${mkt.zip}</strong></div>
+      </td>
+    </tr>`;
+  }).join("");
+
+  result.innerHTML = `<div class="product-card">
+    <div class="product-header">
+      <div class="product-placeholder">📦</div>
+      <div class="product-meta"><h2 id="product-title">Ricerca in corso...</h2><span class="asin-badge" id="product-asin">${asin}</span></div>
+    </div>
+    <div class="markets-table-wrap">
+      <table class="markets-table">
+        <thead><tr>
+          <th>Mercato</th><th>Vendite/mese</th><th>Buy Box</th><th>Eccellente</th><th>Margine netto</th><th>Link</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+    <div class="token-info">Buy Box = offerta principale Amazon (Featured). Eccellente = MIN reale tra tutte le offerte Eccellenti. Margine calcolato sul MIN reale con IVA a margine Art.36.</div>
+  </div>`;
+  result.style.display="block";
+
+  let title=null;
+  const excellentVals=[];
+
+  for (let i=0;i<MARKETS.length;i++) {
+    const mkt=MARKETS[i];
+    const mktAsin=row?(row[mkt.idx]||asin):asin;
+    const rowEl=document.getElementById(`row-${mkt.id}`);
+
+    if (!mktAsin) {
+      rowEl.innerHTML = `
+        <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
+        <td colspan="4"><span class="price-val na">ASIN non disponibile</span></td>
+        <td>—</td>`;
+      continue;
+    }
+
+    try {
+      const data = await fetchScanASIN(mktAsin, mkt.domain);
+
+      if (!title && data.title) {
+        title = data.title;
+        document.getElementById("product-title").textContent = title;
       }
-    }));
-    out.push.apply(out, batchRes);
+
+      const bsr = data.salesRank;
+      let monthlyStr;
+      if (bsr !== null && bsr !== undefined && bsr > 0) {
+        // Mostra sempre il BSR (Best Seller Rank) come indicatore di popolarità uniforme
+        const bsrColor = bsr <= 10 ? '#48bb78' : bsr <= 50 ? '#f59e0b' : '#8890aa';
+        monthlyStr = `<span style="font-size:13px;font-weight:700;color:${bsrColor};">BSR #${bsr.toLocaleString('it-IT')}</span><div class="seller-line">in Renewed</div>`;
+      } else {
+        monthlyStr = '<span class="price-val na">—</span>';
+      }
+
+      const buyBoxCell = buildBuyBoxCell(data);
+      const excellentCell = buildExcellentCell(data);
+
+      // Per il margine: usa MIN reale TOTALE (prezzo + spedizione) se c'è, altrimenti Featured
+      const minRealTotal = data.excellentMinReal && data.excellentMinReal.available ? data.excellentMinReal.totalPrice : null;
+      const featuredPrice = data.excellent && data.excellent.available ? data.excellent.price : null;
+      const sellPrice = minRealTotal || featuredPrice;
+
+      if (sellPrice) excellentVals.push({mkt, val: sellPrice});
+
+      const buyPrice = parseFloat(document.getElementById("buy-price").value)||0;
+      const marginCell = fmtMargin(calcMargin(buyPrice, sellPrice));
+
+      rowEl.innerHTML=`
+        <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
+        <td>${monthlyStr}</td>
+        <td>${buyBoxCell}</td>
+        <td>${excellentCell}</td>
+        <td>${marginCell}</td>
+        <td>
+          <a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a>
+          <div style="font-size:9px;color:#8890aa;margin-top:3px;">CAP locale: <strong style="color:#e8eaf0;">${mkt.zip}</strong></div>
+        </td>`;
+
+    } catch(e) {
+      rowEl.innerHTML=`
+        <td><div class="market-cell"><span class="market-flag">${mkt.flag}</span>${mkt.name}</div></td>
+        <td colspan="4"><span class="price-val na">${e.message||"Errore"}</span></td>
+        <td>
+          <a class="view-link" href="${mkt.url}${mktAsin}" target="_blank">Apri ↗</a>
+          <div style="font-size:9px;color:#8890aa;margin-top:3px;">CAP locale: <strong style="color:#e8eaf0;">${mkt.zip}</strong></div>
+        </td>`;
+    }
+
+    if (i<MARKETS.length-1) await new Promise(r=>setTimeout(r,400));
   }
-  res.json({ count: out.length, results: out });
-});
 
-// =============================================================
-// HEALTH
-// =============================================================
-app.get("/api/health", (req, res) => {
-  res.json({
-    ok: true,
-    env: { keepa: !!KEEPA_KEY, serpapi: !!SERPAPI_KEY, backmarket: !!BM_KEY, ninja: !!NINJA_KEY },
-    endpoints: [
-      "GET /api/health",
-      "GET /api/keepa?asin=&domain=",
-      "GET /api/keepa-offers?asin=&domain=",
-      "GET /api/serpapi?asin=&domain=",
-      "GET /api/ninja?asin=&domain=",
-      "GET /api/scan-asin?asin=&domain=",
-      "POST /api/bulk-scan",
-      "GET /api/scan-asin-deep?asin=&domain=",
-      "GET /api/backmarket/listings?market=FR",
-      "GET /api/backmarket/all",
-      "POST /api/bulk-price",
-    ],
-    time: new Date().toISOString(),
-  });
-});
+  // Highlight mercato con prezzo Eccellente più alto (= vendi qui)
+  if (excellentVals.length) {
+    const maxVal = Math.max(...excellentVals.map(x=>x.val));
+    document.querySelectorAll("table.markets-table tbody tr td .price-val[data-val]").forEach(el=>{
+      const v = parseFloat(el.getAttribute("data-val"));
+      if (v === maxVal) {
+        el.classList.add("highlight");
+        el.innerHTML += `<span class="best-badge">↑ Vendi qui</span>`;
+      }
+    });
+  }
 
-app.listen(PORT, function () {
-  console.log(`Recover Price Scanner running on port ${PORT}`);
-});
+  btn.disabled=false; lbl.style.display="inline"; spin.style.display="none";
+}
+
+document.getElementById("asin-input").addEventListener("keydown", e=>{ if(e.key==="Enter") doSearch(); });
+
+// ─── REPORT FORNITORE ─────────────────────────────────────────────────────────
+const SUPPLIER_NL = [
+  {modello:"iPhone 8 64GB", prezzo_acquisto:45},
+  {modello:"iPhone 8 128GB", prezzo_acquisto:55},
+  {modello:"iPhone 8 256GB", prezzo_acquisto:65},
+  {modello:"iPhone 8 Plus 64GB", prezzo_acquisto:55},
+  {modello:"iPhone 8 Plus 128GB", prezzo_acquisto:65},
+  {modello:"iPhone 8 Plus 256GB", prezzo_acquisto:75},
+  {modello:"iPhone X 64GB", prezzo_acquisto:75},
+  {modello:"iPhone X 256GB", prezzo_acquisto:85},
+  {modello:"iPhone XR 64GB", prezzo_acquisto:95},
+  {modello:"iPhone XR 128GB", prezzo_acquisto:105},
+  {modello:"iPhone XR 256GB", prezzo_acquisto:115},
+  {modello:"iPhone XS 64GB", prezzo_acquisto:110},
+  {modello:"iPhone XS 256GB", prezzo_acquisto:120},
+  {modello:"iPhone SE (2nd Generation) 64GB", prezzo_acquisto:75},
+  {modello:"iPhone SE (2nd Generation) 128GB", prezzo_acquisto:85},
+  {modello:"iPhone SE (2nd Generation) 256GB", prezzo_acquisto:95},
+  {modello:"iPhone SE (3rd Generation) 64GB", prezzo_acquisto:105},
+  {modello:"iPhone SE (3rd Generation) 128GB", prezzo_acquisto:115},
+  {modello:"iPhone SE (3rd Generation) 256GB", prezzo_acquisto:130},
+  {modello:"iPhone 11 64GB", prezzo_acquisto:115},
+  {modello:"iPhone 11 128GB", prezzo_acquisto:135},
+  {modello:"iPhone 11 256GB", prezzo_acquisto:150},
+  {modello:"iPhone 11 Pro 64GB", prezzo_acquisto:140},
+  {modello:"iPhone 11 Pro 256GB", prezzo_acquisto:160},
+  {modello:"iPhone 11 Pro 512GB", prezzo_acquisto:180},
+  {modello:"iPhone 11 Pro Max 64GB", prezzo_acquisto:155},
+  {modello:"iPhone 11 Pro Max 256GB", prezzo_acquisto:175},
+  {modello:"iPhone 11 Pro Max 512GB", prezzo_acquisto:195},
+  {modello:"iPhone 12 64GB", prezzo_acquisto:135},
+  {modello:"iPhone 12 128GB", prezzo_acquisto:155},
+  {modello:"iPhone 12 256GB", prezzo_acquisto:175},
+  {modello:"iPhone 12 Pro Max 128GB", prezzo_acquisto:245},
+  {modello:"iPhone 12 Pro Max 256GB", prezzo_acquisto:275},
+  {modello:"iPhone 12 Pro Max 512GB", prezzo_acquisto:305},
+  {modello:"iPhone 13 Mini 128GB", prezzo_acquisto:175},
+  {modello:"iPhone 13 Mini 256GB", prezzo_acquisto:195},
+  {modello:"iPhone 13 Mini 512GB", prezzo_acquisto:215},
+  {modello:"iPhone 13 Pro 128GB", prezzo_acquisto:265},
+  {modello:"iPhone 13 Pro 256GB", prezzo_acquisto:285},
+  {modello:"iPhone 13 Pro 512GB", prezzo_acquisto:305},
+  {modello:"iPhone 13 Pro 1TB", prezzo_acquisto:325},
+  {modello:"iPhone 13 Pro Max 128GB", prezzo_acquisto:320},
+  {modello:"iPhone 13 Pro Max 256GB", prezzo_acquisto:365},
+  {modello:"iPhone 13 Pro Max 512GB", prezzo_acquisto:395},
+  {modello:"iPhone 13 Pro Max 1TB", prezzo_acquisto:425},
+  {modello:"iPhone 14 128GB", prezzo_acquisto:260},
+  {modello:"iPhone 14 256GB", prezzo_acquisto:290},
+  {modello:"iPhone 14 512GB", prezzo_acquisto:320},
+  {modello:"iPhone 14 Plus 128GB", prezzo_acquisto:280},
+  {modello:"iPhone 14 Plus 256GB", prezzo_acquisto:300},
+  {modello:"iPhone 14 Plus 512GB", prezzo_acquisto:320},
+  {modello:"iPhone 14 Pro 128GB", prezzo_acquisto:365},
+  {modello:"iPhone 14 Pro 256GB", prezzo_acquisto:385},
+  {modello:"iPhone 14 Pro 512GB", prezzo_acquisto:405},
+  {modello:"iPhone 14 Pro 1TB", prezzo_acquisto:430},
+  {modello:"iPhone 14 Pro Max 128GB", prezzo_acquisto:400},
+  {modello:"iPhone 14 Pro Max 256GB", prezzo_acquisto:430},
+  {modello:"iPhone 14 Pro Max 512GB", prezzo_acquisto:460},
+  {modello:"iPhone 14 Pro Max 1TB", prezzo_acquisto:490},
+  {modello:"iPhone 15 128GB", prezzo_acquisto:390},
+  {modello:"iPhone 15 256GB", prezzo_acquisto:420},
+  {modello:"iPhone 15 512GB", prezzo_acquisto:450},
+  {modello:"iPhone 15 Plus 128GB", prezzo_acquisto:390},
+  {modello:"iPhone 15 Plus 256GB", prezzo_acquisto:420},
+  {modello:"iPhone 15 Plus 512GB", prezzo_acquisto:450},
+  {modello:"iPhone 15 Pro 128GB", prezzo_acquisto:455},
+  {modello:"iPhone 15 Pro 256GB", prezzo_acquisto:485},
+  {modello:"iPhone 15 Pro 512GB", prezzo_acquisto:515},
+  {modello:"iPhone 15 Pro 1TB", prezzo_acquisto:545},
+  {modello:"iPhone 15 Pro Max 256GB", prezzo_acquisto:510},
+  {modello:"iPhone 15 Pro Max 512GB", prezzo_acquisto:540},
+  {modello:"iPhone 15 Pro Max 1TB", prezzo_acquisto:570},
+  {modello:"iPhone 16 128GB", prezzo_acquisto:495},
+  {modello:"iPhone 16 256GB", prezzo_acquisto:535},
+  {modello:"iPhone 16 512GB", prezzo_acquisto:565},
+  {modello:"iPhone 16 Plus 128GB", prezzo_acquisto:515},
+  {modello:"iPhone 16 Plus 256GB", prezzo_acquisto:565},
+  {modello:"iPhone 16 Plus 512GB", prezzo_acquisto:585},
+  {modello:"iPhone 16 Pro 128GB", prezzo_acquisto:635},
+  {modello:"iPhone 16 Pro 256GB", prezzo_acquisto:675},
+  {modello:"iPhone 16 Pro 512GB", prezzo_acquisto:695},
+  {modello:"iPhone 16 Pro 1TB", prezzo_acquisto:715},
+  {modello:"iPhone 16 Pro Max 256GB", prezzo_acquisto:705},
+  {modello:"iPhone 16 Pro Max 512GB", prezzo_acquisto:755},
+  {modello:"iPhone 16 Pro Max 1TB", prezzo_acquisto:785},
+];
+
+function getCatalogRowsForModel(modello) {
+  const m = modello.toLowerCase();
+  return CATALOG.filter(row => `${row[1]} ${row[2]}`.toLowerCase() === m);
+}
+
+function buildSupplierItems() {
+  const items = [];
+  for (const s of SUPPLIER_NL) {
+    const rows = getCatalogRowsForModel(s.modello);
+    if (!rows.length) {
+      items.push({modello:s.modello,colore:'—',prezzo_acquisto:s.prezzo_acquisto,asin_it:'',asin_de:'',asin_fr:'',asin_es:'',markets:{}});
+    } else {
+      for (const row of rows) {
+        items.push({modello:s.modello,colore:row[3],prezzo_acquisto:s.prezzo_acquisto,asin_it:row[4]||'',asin_de:row[5]||'',asin_fr:row[6]||'',asin_es:row[7]||'',markets:{}});
+      }
+    }
+  }
+  return items;
+}
+
+let allReportData = [];
+
+function getActiveMarkets() {
+  return MARKETS.filter(m => document.getElementById('mkt-'+m.id).checked);
+}
+
+function updateEstimate() {
+  const data = allReportData.length ? allReportData : buildSupplierItems();
+  const active = getActiveMarkets();
+  let count = 0;
+  for (const r of data) for (const mkt of active) if (r['asin_'+mkt.id.toLowerCase()]) count++;
+  document.getElementById('report-estimate').textContent = count
+    ? `≈ ${count} chiamate SerpApi (~${Math.round(count/5000*100)}% budget mensile)`
+    : '';
+}
+
+function filterReport() {
+  const q = document.getElementById('report-search').value.toLowerCase();
+  renderReportTable(allReportData.filter(r => !q || r.modello.toLowerCase().includes(q) || (r.colore||'').toLowerCase().includes(q)));
+}
+
+function renderReportTable(data) {
+  const wrap = document.getElementById('report-table-wrap');
+  if (!data.length) { wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#8890aa;">Nessun dato — clicca "Avvia scansione prezzi"</div>'; return; }
+
+  const active = getActiveMarkets();
+
+  let lastModello = '';
+  const rows = data.map(r => {
+    const isNewModello = r.modello !== lastModello;
+    lastModello = r.modello;
+
+    const mktCells = active.map(mkt => {
+      const d = r.markets?.[mkt.id];
+      const asinKey = 'asin_'+mkt.id.toLowerCase();
+      if (!r[asinKey]) return `<td colspan="2" style="padding:5px 8px;text-align:center;font-size:10px;color:#2e3350;">—</td>`;
+      if (!d) return `<td style="padding:5px 8px;text-align:center;font-size:10px;color:#8890aa;">...</td><td style="padding:5px 8px;text-align:center;font-size:10px;color:#8890aa;">...</td>`;
+      if (d.error) return `<td colspan="2" style="padding:5px 8px;text-align:center;font-size:9px;color:#f56565;">${d.error}</td>`;
+      const exStr = d.excellent !== null && d.excellent !== undefined ? `€${d.excellent.toFixed(0)}` : '<span style="color:#f59e0b;">∅</span>';
+      const net = (d.excellent !== null && d.excellent !== undefined) ? calcMargin(r.prezzo_acquisto, d.excellent) : null;
+      const netColor = net === null ? '#8890aa' : net > 30 ? '#48bb78' : net > 0 ? '#f59e0b' : '#f56565';
+      const netStr = net !== null ? `€${net.toFixed(0)}` : '—';
+      return `<td style="padding:5px 8px;text-align:center;font-size:10px;color:#e8eaf0;">${exStr}</td><td style="padding:5px 8px;text-align:center;font-size:10px;font-weight:700;color:${netColor};">${netStr}</td>`;
+    }).join('');
+
+    const modelloCell = isNewModello
+      ? `<td style="padding:5px 8px;font-size:11px;font-weight:700;color:#e8eaf0;border-right:1px solid #2e3350;">${r.modello}</td>`
+      : `<td style="padding:5px 8px;font-size:11px;color:#8890aa;border-right:1px solid #2e3350;"></td>`;
+
+    const rowBg = isNewModello ? 'rgba(79,142,247,0.04)' : 'transparent';
+
+    return `<tr style="border-bottom:1px solid rgba(46,51,80,0.3);background:${rowBg};">
+      ${modelloCell}
+      <td style="padding:5px 8px;font-size:10px;color:#8890aa;">${r.colore}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:10px;color:#4f8ef7;font-weight:700;">€${r.prezzo_acquisto}</td>
+      ${mktCells}
+    </tr>`;
+  }).join('');
+
+  const mktHeaders = active.map(m => `<th colspan="2" style="padding:8px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">${m.flag} ${m.id}</th>`).join('');
+  const mktSubHeaders = active.map(() => '<th style="padding:3px 8px;text-align:center;font-size:8px;color:#64748b;">Eccellente</th><th style="padding:3px 8px;text-align:center;font-size:8px;color:#64748b;">Margine</th>').join('');
+
+  wrap.innerHTML = `<div style="background:#1a1d27;border:1px solid #2e3350;border-radius:10px;overflow:hidden;">
+    <div style="overflow-x:auto;max-height:65vh;overflow-y:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:10px;">
+        <thead style="position:sticky;top:0;background:#1a1d27;z-index:1;">
+          <tr style="border-bottom:2px solid #2e3350;">
+            <th style="padding:8px;text-align:left;font-size:9px;color:#8890aa;text-transform:uppercase;min-width:160px;">Modello</th>
+            <th style="padding:8px;text-align:left;font-size:9px;color:#8890aa;text-transform:uppercase;">Colore</th>
+            <th style="padding:8px;text-align:center;font-size:9px;color:#8890aa;text-transform:uppercase;">Acquisto</th>
+            ${mktHeaders}
+          </tr>
+          <tr style="border-bottom:1px solid #2e3350;">
+            <th></th><th></th><th></th>
+            ${mktSubHeaders}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+async function runReport() {
+  const btn = document.getElementById('report-btn');
+  const status = document.getElementById('report-status');
+  const active = getActiveMarkets();
+  if (!active.length) { alert('Seleziona almeno un mercato'); return; }
+
+  btn.disabled = true; btn.textContent = '⟳ Scansione in corso...';
+  allReportData = buildSupplierItems();
+  renderReportTable(allReportData);
+
+  const flatItems = [];
+  for (let rowIdx = 0; rowIdx < allReportData.length; rowIdx++) {
+    const r = allReportData[rowIdx];
+    for (const mkt of active) {
+      const asin = r['asin_'+mkt.id.toLowerCase()];
+      if (asin) flatItems.push({ rowIdx, market: mkt.id, asin, domain: Number(mkt.domain) });
+    }
+  }
+
+  const total = flatItems.length;
+  let done = 0;
+  status.textContent = `Pronto: ${total} chiamate da fare su ${active.length} mercati`;
+
+  const batchSize = 6;
+  for (let i = 0; i < flatItems.length; i += batchSize) {
+    const slice = flatItems.slice(i, i + batchSize);
+    try {
+      const r = await fetch('/api/bulk-scan', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ items: slice.map(it => ({ asin: it.asin, domain: it.domain })) })
+      });
+      const json = await r.json();
+      const results = json.results || [];
+      for (let j = 0; j < results.length; j++) {
+        const res = results[j];
+        const meta = slice[j];
+        if (!meta) continue;
+        const targetRow = allReportData[meta.rowIdx];
+        if (!targetRow.markets) targetRow.markets = {};
+        if (res.serpapiOk === false && res.keepaOk === false) {
+          targetRow.markets[meta.market] = { error: 'err' };
+        } else {
+          targetRow.markets[meta.market] = {
+            excellent: res.excellent?.available ? res.excellent.price : null,
+            monthlySold: res.monthlySold ?? null
+          };
+        }
+        done++;
+      }
+      status.textContent = `Elaborati ${done}/${total} chiamate...`;
+      filterReport();
+    } catch(e) {
+      status.textContent = `Errore: ${e.message}`;
+      break;
+    }
+    if (i + batchSize < flatItems.length) await new Promise(r => setTimeout(r, 700));
+  }
+
+  status.textContent = `✓ Completato — ${done}/${total} chiamate eseguite`;
+  btn.disabled = false; btn.textContent = '▶ Avvia scansione prezzi';
+}
+
+window.addEventListener('DOMContentLoaded', updateEstimate);
+</script>
+</body>
+</html>
