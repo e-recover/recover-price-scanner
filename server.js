@@ -36,16 +36,40 @@ const MARKET_CODE    = { 8: "IT", 3: "DE", 4: "FR", 9: "ES" };
 // =============================================================
 // HELPER — parsing
 // =============================================================
+// FIX parsePrice: gestisce formato EU "1.234,56" e EN "1,234.56"
+// senza troncare i decimali (bug vecchio: .replace(",",".") singola occorrenza)
 function parsePrice(s) {
   if (s === null || s === undefined) return null;
   if (typeof s === "number") return s;
-  const cleaned = String(s)
-    .replace(/[^\d,.-]/g, "")
-    .replace(/\.(?=\d{3}(\D|$))/g, "")
-    .replace(",", ".");
-  const n = parseFloat(cleaned);
+  let str = String(s).replace(/[^\d,.-]/g, "");
+  if (!str) return null;
+
+  const lastComma = str.lastIndexOf(",");
+  const lastDot   = str.lastIndexOf(".");
+
+  if (lastComma > -1 && lastDot > -1) {
+    if (lastComma > lastDot) {
+      // Formato EU "1.234,56" → punti = migliaia, virgola = decimale
+      str = str.replace(/\./g, "").replace(",", ".");
+    } else {
+      // Formato EN "1,234.56" → virgole = migliaia, punto = decimale
+      str = str.replace(/,/g, "");
+    }
+  } else if (lastComma > -1) {
+    // Solo virgola = separatore decimale ("559,99")
+    str = str.replace(/\./g, "").replace(",", ".");
+  }
+  // Solo punto o nessun separatore: già corretto
+
+  const n = parseFloat(str);
   return isNaN(n) ? null : Math.round(n * 100) / 100;
 }
+
+// FIX: valida formato ASIN Amazon (10 caratteri alfanumerici maiuscoli)
+function isValidAsin(asin) {
+  return typeof asin === "string" && /^[A-Z0-9]{10}$/.test(asin.trim().toUpperCase());
+}
+
 function parseSellerRating(s) {
   if (!s) return null;
   const n = parseFloat(String(s).replace(",", "."));
@@ -231,6 +255,8 @@ app.get("/api/scan-asin", async (req, res) => {
   const asin = req.query.asin;
   const domain = parseInt(req.query.domain || 8, 10);
   if (!asin) return res.status(400).json({ error: "asin required" });
+  // FIX: validazione formato ASIN prima di chiamare le API a pagamento
+  if (!isValidAsin(asin)) return res.status(400).json({ error: "ASIN non valido — deve essere 10 caratteri alfanumerici (es. B0CVJ2RLP5)" });
 
   let keepaOk = false, serpapiOk = false, ninjaOk = false;
   let title = null, monthlySold = null, amazonBuyBox = null, salesRank = null;
@@ -245,7 +271,7 @@ app.get("/api/scan-asin", async (req, res) => {
   let acceptableMinReal = { price: null, totalPrice: null, deliveryFee: 0, seller: null, sellerId: null, positivePercent: null, rank: null, count: 0, available: false, apparentMin: null };
   // Featured da Ninja product_offers[0 Excellent] (variabile dedicata per evitare race con SerpApi)
   let ninjaFeaturedExcellent = null;
-  let recoverPosition   = { inList: false, rank: null, condition: null, price: null, isLowest: false, nextPrice: null, nextSeller: null, nextFeedback: null, ceilingPrice: null, priceGain: null };
+  let recoverPosition   = { inList: false, rank: null, condition: null, price: null, isLowest: false, tiedLowest: false, tiedSeller: null, nextPrice: null, nextSeller: null, nextFeedback: null, ceilingPrice: null, priceGain: null };
 
   const promises = [];
 
@@ -262,20 +288,42 @@ app.get("/api/scan-asin", async (req, res) => {
           const last = csv[1][csv[1].length - 1];
           if (typeof last === "number" && last > 0) amazonBuyBox = last;
         }
-        // Sales Rank (BSR) — csv[3] è la serie storica del Sales Rank
-        if (Array.isArray(csv[3]) && csv[3].length >= 2) {
-          // Cerco l'ultimo valore valido (>0) partendo dalla fine
-          for (let i = csv[3].length - 1; i >= 0; i -= 2) {
-            const v = csv[3][i];
-            if (typeof v === "number" && v > 0) {
-              salesRank = v;
-              break;
-            }
+        // FIX BSR: leggo il rank della SOTTOCATEGORIA "Renewed",
+        // non csv[3] (= categoria root Elettronica, valori inutili tipo #6756).
+        // salesRanks è { catId: [timestamp, rank, timestamp, rank, ...] }
+        // La categoria Renewed è la più specifica (rank più basso tra le sottocategorie).
+        function lastRankFromSeries(series) {
+          if (!Array.isArray(series)) return null;
+          for (let i = series.length - 1; i >= 1; i -= 2) {
+            const v = series[i];
+            if (typeof v === "number" && v > 0) return v;
+          }
+          return null;
+        }
+        if (p.salesRanks && typeof p.salesRanks === "object") {
+          const rootCat = String(p.salesRankReference || p.rootCategory || "");
+          const candidates = [];
+          for (const catId of Object.keys(p.salesRanks)) {
+            // Escludo la categoria root (Elettronica): troppo generica
+            if (catId === rootCat) continue;
+            const r = lastRankFromSeries(p.salesRanks[catId]);
+            if (r !== null) candidates.push(r);
+          }
+          if (candidates.length > 0) {
+            // La sottocategoria "Renewed" ha sempre il rank più basso (più specifica)
+            salesRank = Math.min.apply(null, candidates);
           }
         }
-        // Fallback: stats.current[3] è il BSR attuale
+        // Fallback 1: stats.current[3] (BSR categoria principale, meno preciso)
         if (!salesRank && p.stats && Array.isArray(p.stats.current) && p.stats.current[3] > 0) {
           salesRank = p.stats.current[3];
+        }
+        // Fallback 2: csv[3] ultimo valore valido
+        if (!salesRank && Array.isArray(csv[3]) && csv[3].length >= 2) {
+          for (let i = csv[3].length - 1; i >= 0; i -= 2) {
+            const v = csv[3][i];
+            if (typeof v === "number" && v > 0) { salesRank = v; break; }
+          }
         }
       }
     }).catch(() => { keepaOk = false; })
@@ -369,7 +417,7 @@ app.get("/api/scan-asin", async (req, res) => {
         acceptableMinReal = buildMin("acceptable");
 
         // BUY BOX EXCELLENT:
-        // 1. Cerca in buy_boxes[] di Ninja (Buy Box ufficiale per condition, dato Amazon coerente con la pagina prodotto)
+        // 1. Cerca in buy_boxes[] di Ninja (Buy Box ufficiale per condition, coerente con la pagina prodotto)
         // 2. Trova seller corrispondente cercando per prezzo nelle product_offers
         // 3. Fallback: prima offerta Excellent nella lista product_offers (se buy_boxes non ha Excellent)
         const buyBoxes = Array.isArray(d.buy_boxes) ? d.buy_boxes : [];
@@ -418,27 +466,39 @@ app.get("/api/scan-asin", async (req, res) => {
             condition: myOffer.condition,
             price: myOffer.price,
             isLowest: false,
+            tiedLowest: false,
+            tiedSeller: null,
             nextPrice: null,
             nextSeller: null,
             nextFeedback: null,
             ceilingPrice: null,
             priceGain: null,
           };
-          // Se Recover è in condition Excellent, calcolo se è il più basso e il next competitor
+          // Se Recover è in condition Excellent, calcolo posizione e next competitor
           if (myOffer.condition === "excellent") {
             const otherExcellent = enriched
               .filter(o => o.condition === "excellent" && o.sellerId !== RECOVER_SELLER_ID)
               .sort((a, b) => a.totalPrice - b.totalPrice);
             if (otherExcellent.length > 0) {
-              const next = otherExcellent[0];
-              if (myOffer.totalPrice < next.totalPrice) {
+              const cheapest = otherExcellent[0];
+              const EPS = 0.01; // tolleranza centesimi per "stesso prezzo"
+              if (myOffer.totalPrice < cheapest.totalPrice - EPS) {
+                // Recover strettamente il più basso → suggerisci di alzare fino al competitor
                 recoverPosition.isLowest = true;
-                recoverPosition.nextPrice = next.totalPrice;
-                recoverPosition.nextSeller = next.seller;
-                recoverPosition.nextFeedback = next.positivePercent;
-                recoverPosition.ceilingPrice = Math.round((next.totalPrice - 0.01) * 100) / 100;
+                recoverPosition.nextPrice = cheapest.totalPrice;
+                recoverPosition.nextSeller = cheapest.seller;
+                recoverPosition.nextFeedback = cheapest.positivePercent;
+                recoverPosition.ceilingPrice = Math.round((cheapest.totalPrice - 0.01) * 100) / 100;
                 recoverPosition.priceGain = Math.round((recoverPosition.ceilingPrice - myOffer.totalPrice) * 100) / 100;
+              } else if (Math.abs(myOffer.totalPrice - cheapest.totalPrice) <= EPS) {
+                // Recover alla pari col competitor più basso → già competitivo, NON alzare
+                recoverPosition.tiedLowest = true;
+                recoverPosition.tiedSeller = cheapest.seller;
+                recoverPosition.nextPrice = cheapest.totalPrice;
+                recoverPosition.nextSeller = cheapest.seller;
+                recoverPosition.nextFeedback = cheapest.positivePercent;
               }
+              // else: Recover non è il più basso → resta caso #3 (rank)
             } else {
               // Recover unico Excellent
               recoverPosition.isLowest = true;
