@@ -776,6 +776,69 @@ app.post("/api/bulk-price", async (req, res) => {
 });
 
 // =============================================================
+// =============================================================
+// PREZZI — GET /api/prezzi  (sola lettura per Excel/Power Query)
+// Params: asins=ASIN1,ASIN2,... | condizione=eccellente | locale=IT
+// =============================================================
+const LOCALE_TO_DOMAIN = { IT: 8, DE: 3, FR: 4, ES: 9 };
+const COND_MAP_PREZZI = {
+    eccellente: "excellent", excellent: "excellent",
+    ottimo: "premium",      premium:  "premium",
+    buono: "good",          good:     "good",
+    accettabile: "acceptable", acceptable: "acceptable"
+};
+function keepaCondToKey(c) {
+    if (c === 1 || c === 10) return "premium";
+    if (c === 2) return "excellent";
+    if (c === 3) return "very_good";
+    if (c === 4) return "good";
+    if (c === 5) return "acceptable";
+    return "unknown";
+}
+function latestKeepaPrice(offerCSV) {
+    if (!Array.isArray(offerCSV) || offerCSV.length < 2) return null;
+    var v = offerCSV[offerCSV.length - 1];
+    return (typeof v === "number" && v > 0) ? Math.round(v) / 100 : null;
+}
+app.get("/api/prezzi", async function(req, res) {
+    if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY not configured" });
+    var rawAsins = String(req.query.asins || "");
+    var condizione = String(req.query.condizione || "eccellente").toLowerCase().trim();
+    var locale = String(req.query.locale || "IT").toUpperCase().trim();
+    var asins = rawAsins.split(",").map(function(a) { return a.trim().toUpperCase(); }).filter(function(a) { return isValidAsin(a); });
+    if (asins.length === 0) return res.status(400).json({ error: "Param 'asins' mancante o non valido (es. ?asins=B0CV123456)" });
+    if (asins.length > 20) return res.status(400).json({ error: "Massimo 20 ASIN per richiesta" });
+    var domain = LOCALE_TO_DOMAIN[locale];
+    if (!domain) return res.status(400).json({ error: "Locale non supportato: " + locale + ". Ammessi: IT, DE, FR, ES" });
+    var condKey = COND_MAP_PREZZI[condizione];
+    if (!condKey) return res.status(400).json({ error: "Condizione non supportata: " + condizione + ". Ammesse: eccellente, ottimo, buono, accettabile" });
+    var ts = new Date().toISOString().slice(0, 10);
+    var results = [];
+    await Promise.all(asins.map(async function(asin) {
+          try {
+                  var json = await callKeepa(asin, domain, true);
+                  var p = json && json.products && json.products[0];
+                  if (!p) { results.push({ asin: asin, modello: null, taglio: null, prezzo: null, ts: ts, error: "Prodotto non trovato" }); return; }
+                  var title = p.title || null, modello = title, taglio = null;
+                  if (title) { var m = title.match(/(\d+)\s*GB/i); if (m) { taglio = m[1] + "GB"; modello = title.replace(m[0], "").replace(/\s+/g, " ").trim(); } }
+                  var offers = Array.isArray(p.offers) ? p.offers : [];
+                  var prices = [];
+                  for (var i = 0; i < offers.length; i++) {
+                            var o = offers[i];
+                            if (keepaCondToKey(o.condition) === condKey) {
+                                        var pr = latestKeepaPrice(o.offerCSV);
+                                        if (pr !== null) prices.push(pr);
+                            }
+                  }
+                  results.push({ asin: asin, modello: modello, taglio: taglio, prezzo: prices.length > 0 ? Math.min.apply(null, prices) : null, ts: ts });
+          } catch (err) {
+                  results.push({ asin: asin, modello: null, taglio: null, prezzo: null, ts: ts, error: err.message });
+          }
+    }));
+    results.sort(function(a, b) { return a.asin.localeCompare(b.asin); });
+    res.json(results);
+});
+
 // HEALTH
 // =============================================================
 app.get("/api/health", (req, res) => {
