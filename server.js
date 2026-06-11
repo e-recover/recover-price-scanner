@@ -776,68 +776,193 @@ app.post("/api/bulk-price", async (req, res) => {
 });
 
 // =============================================================
+// PREZZI — GET /api/prezzi  (sola lettura, cache + job schedulato)
+// GET /api/prezzi?condizione=eccellente&locale=IT
+// GET /api/prezzi/refresh  (forza aggiornamento manuale)
 // =============================================================
-// PREZZI — GET /api/prezzi  (sola lettura per Excel/Power Query)
-// Params: asins=ASIN1,ASIN2,... | condizione=eccellente | locale=IT
-// =============================================================
-const LOCALE_TO_DOMAIN = { IT: 8, DE: 3, FR: 4, ES: 9 };
-const COND_MAP_PREZZI = {
-    eccellente: "excellent", excellent: "excellent",
-    ottimo: "premium",      premium:  "premium",
-    buono: "good",          good:     "good",
-    accettabile: "acceptable", acceptable: "acceptable"
-};
-function keepaCondToKey(c) {
-    if (c === 1 || c === 10) return "premium";
-    if (c === 2) return "excellent";
-    if (c === 3) return "very_good";
-    if (c === 4) return "good";
-    if (c === 5) return "acceptable";
-    return "unknown";
+
+// Lista fissa di 71 ASIN di riferimento (mercato IT)
+const PREZZI_ASIN_LIST = [
+  { asin: "B08D39SX4M",  modello: "iPhone SE 2",      taglio: "64GB"  },
+  { asin: "B08D377VBX",  modello: "iPhone SE 2",      taglio: "128GB" },
+  { asin: "B08D3JV5SX",  modello: "iPhone SE 2",      taglio: "256GB" },
+  { asin: "B0BDY71GRG",  modello: "iPhone SE 3",      taglio: "64GB"  },
+  { asin: "B0BGFMLN1W",  modello: "iPhone SE 3",      taglio: "128GB" },
+  { asin: "B0BGFMWDXJ",  modello: "iPhone SE 3",      taglio: "256GB" },
+  { asin: "B08PCF2P4R",  modello: "iPhone 12 Mini",   taglio: "64GB"  },
+  { asin: "B08PCDKD6G",  modello: "iPhone 12 Mini",   taglio: "128GB" },
+  { asin: "B08PCCTXN2",  modello: "iPhone 12 Mini",   taglio: "256GB" },
+  { asin: "B08PCFVC58",  modello: "iPhone 12",        taglio: "64GB"  },
+  { asin: "B08PCGL5TH",  modello: "iPhone 12",        taglio: "128GB" },
+  { asin: "B08PCCZB1H",  modello: "iPhone 12",        taglio: "256GB" },
+  { asin: "B08PCDP3LM",  modello: "iPhone 12 Pro",    taglio: "128GB" },
+  { asin: "B08PCD4VHZ",  modello: "iPhone 12 Pro",    taglio: "256GB" },
+  { asin: "B08PCDHXTD",  modello: "iPhone 12 Pro",    taglio: "512GB" },
+  { asin: "B08PCDHMWQ",  modello: "iPhone 12 Pro Max",taglio: "128GB" },
+  { asin: "B08PCC7RG1",  modello: "iPhone 12 Pro Max",taglio: "256GB" },
+  { asin: "B08PCCB12Y",  modello: "iPhone 12 Pro Max",taglio: "512GB" },
+  { asin: "B09MJSRKWK",  modello: "iPhone 13 Mini",   taglio: "128GB" },
+  { asin: "B09MJSVVC9",  modello: "iPhone 13 Mini",   taglio: "256GB" },
+  { asin: "B09MJSXCHP",  modello: "iPhone 13 Mini",   taglio: "512GB" },
+  { asin: "B09MGFJK73",  modello: "iPhone 13",        taglio: "128GB" },
+  { asin: "B09MJSHQ6C",  modello: "iPhone 13",        taglio: "256GB" },
+  { asin: "B09MJRLLMG",  modello: "iPhone 13",        taglio: "512GB" },
+  { asin: "B09ML6X61Z",  modello: "iPhone 13 Pro",    taglio: "128GB" },
+  { asin: "B09MJSNM1L",  modello: "iPhone 13 Pro",    taglio: "256GB" },
+  { asin: "B09MJRZFM7",  modello: "iPhone 13 Pro",    taglio: "512GB" },
+  { asin: "B09MJSDC8D",  modello: "iPhone 13 Pro",    taglio: "1TB"   },
+  { asin: "B09ML6BTJV",  modello: "iPhone 13 Pro Max",taglio: "128GB" },
+  { asin: "B09ML89FG2",  modello: "iPhone 13 Pro Max",taglio: "256GB" },
+  { asin: "B09MJTW6DP",  modello: "iPhone 13 Pro Max",taglio: "512GB" },
+  { asin: "B09MJQHTMG",  modello: "iPhone 13 Pro Max",taglio: "1TB"   },
+  { asin: "B0BNLXKVNQ",  modello: "iPhone 14",        taglio: "128GB" },
+  { asin: "B0BNMC5PXS",  modello: "iPhone 14",        taglio: "256GB" },
+  { asin: "B0BNLXLFJ2",  modello: "iPhone 14",        taglio: "512GB" },
+  { asin: "B0BNMBHM8Z",  modello: "iPhone 14 Plus",   taglio: "128GB" },
+  { asin: "B0BNM1L14Z",  modello: "iPhone 14 Plus",   taglio: "256GB" },
+  { asin: "B0BNM1C6LH",  modello: "iPhone 14 Plus",   taglio: "512GB" },
+  { asin: "B0BNLZ9G4N",  modello: "iPhone 14 Pro",    taglio: "128GB" },
+  { asin: "B0BNLYT3ML",  modello: "iPhone 14 Pro",    taglio: "256GB" },
+  { asin: "B0BNM1N3C3",  modello: "iPhone 14 Pro",    taglio: "512GB" },
+  { asin: "B0BNLZMT75",  modello: "iPhone 14 Pro",    taglio: "1TB"   },
+  { asin: "B0BNLZCPZ3",  modello: "iPhone 14 Pro Max",taglio: "128GB" },
+  { asin: "B0BNLYYK2X",  modello: "iPhone 14 Pro Max",taglio: "256GB" },
+  { asin: "B0BNM1ZNK3",  modello: "iPhone 14 Pro Max",taglio: "512GB" },
+  { asin: "B0BNLZCFSD",  modello: "iPhone 14 Pro Max",taglio: "1TB"   },
+  { asin: "B0CVJ23L79",  modello: "iPhone 15",        taglio: "128GB" },
+  { asin: "B0CVJ7H584",  modello: "iPhone 15",        taglio: "256GB" },
+  { asin: "B0CVJ247SC",  modello: "iPhone 15",        taglio: "512GB" },
+  { asin: "B0CVJSMQBB",  modello: "iPhone 15 Plus",   taglio: "128GB" },
+  { asin: "B0CVJSHFZ8",  modello: "iPhone 15 Plus",   taglio: "256GB" },
+  { asin: "B0CVJ2RLP5",  modello: "iPhone 15 Pro",    taglio: "128GB" },
+  { asin: "B0CVJVJNQS",  modello: "iPhone 15 Pro",    taglio: "256GB" },
+  { asin: "B0CVJNXTBM",  modello: "iPhone 15 Pro",    taglio: "512GB" },
+  { asin: "B0CVZS8NP5",  modello: "iPhone 15 Pro",    taglio: "1TB"   },
+  { asin: "B0CVJXGPG4",  modello: "iPhone 15 Pro Max",taglio: "256GB" },
+  { asin: "B0CVJVM1DH",  modello: "iPhone 15 Pro Max",taglio: "512GB" },
+  { asin: "B0CW15R8JR",  modello: "iPhone 15 Pro Max",taglio: "1TB"   },
+  { asin: "B0DHYF5TVV",  modello: "iPhone 16",        taglio: "128GB" },
+  { asin: "B0DHYF6Z92",  modello: "iPhone 16",        taglio: "256GB" },
+  { asin: "B0DHYBQCTV",  modello: "iPhone 16",        taglio: "512GB" },
+  { asin: "B0DHYFRN36",  modello: "iPhone 16 Plus",   taglio: "128GB" },
+  { asin: "B0DHYFG675",  modello: "iPhone 16 Plus",   taglio: "256GB" },
+  { asin: "B0DHYD6JVY",  modello: "iPhone 16 Plus",   taglio: "512GB" },
+  { asin: "B0DHYDBXJ9",  modello: "iPhone 16 Pro",    taglio: "128GB" },
+  { asin: "B0DHYDMJ1W",  modello: "iPhone 16 Pro",    taglio: "256GB" },
+  { asin: "B0DHYG9G2C",  modello: "iPhone 16 Pro",    taglio: "512GB" },
+  { asin: "B0DHYDTQ7T",  modello: "iPhone 16 Pro",    taglio: "1TB"   },
+  { asin: "B0DHYCQZC4",  modello: "iPhone 16 Pro Max",taglio: "256GB" },
+  { asin: "B0DHYCLJCV",  modello: "iPhone 16 Pro Max",taglio: "512GB" },
+  { asin: "B0DHYF6H1P",  modello: "iPhone 16 Pro Max",taglio: "1TB"   },
+  ];
+
+// Cache in memoria: { data: [...], ts: null | ISO-string }
+var prezziCache = { data: [], ts: null, loading: false };
+
+// Keepa domain IT = 8
+const PREZZI_DOMAIN = 8;
+
+// CSV index 12 = "Used – Very Good" = "Eccellente" su Amazon IT
+// Indici Keepa csv[]: 11=New/LikeNew, 12=VeryGood(Eccellente), 13=Good, 14=Acceptable
+const KEEPA_CSV_ECCELLENTE = 12;
+
+// Estrae l'ultimo prezzo valido da un array CSV Keepa [time,price,time,price,...]
+// I prezzi Keepa sono in centesimi*100, -1 = esaurito. Ritorna float in EUR o null.
+function latestPriceFromCsv(csv) {
+    if (!Array.isArray(csv) || csv.length < 2) return null;
+    // Scorre al contrario cercando l'ultimo prezzo != -1
+    for (var i = csv.length - 1; i >= 1; i -= 2) {
+          var price = csv[i];
+          if (typeof price === "number" && price > 0) {
+                  return Math.round(price) / 100;
+          }
+    }
+    return null;
 }
-function latestKeepaPrice(offerCSV) {
-    if (!Array.isArray(offerCSV) || offerCSV.length < 2) return null;
-    var v = offerCSV[offerCSV.length - 1];
-    return (typeof v === "number" && v > 0) ? Math.round(v) / 100 : null;
+
+// Chiama Keepa in batch (max 20 ASIN per richiesta) e aggiorna la cache
+async function refreshPrezziCache() {
+    if (!KEEPA_KEY) { console.warn("[prezzi] KEEPA_API_KEY non configurata, skip refresh"); return; }
+    if (prezziCache.loading) { console.log("[prezzi] Refresh già in corso, skip"); return; }
+    prezziCache.loading = true;
+    console.log("[prezzi] Avvio refresh cache per " + PREZZI_ASIN_LIST.length + " ASIN...");
+    var BATCH = 20;
+    var results = [];
+    var ts = new Date().toISOString().slice(0, 10);
+    try {
+          for (var i = 0; i < PREZZI_ASIN_LIST.length; i += BATCH) {
+                  var batch = PREZZI_ASIN_LIST.slice(i, i + BATCH);
+                  var asinStr = batch.map(function(x) { return x.asin; }).join(",");
+                  var url = "https://api.keepa.com/product?key=" + KEEPA_KEY +
+                                    "&domain=" + PREZZI_DOMAIN +
+                                    "&asin=" + asinStr +
+                                    "&stats=0&history=1&offers=0";
+                  var resp, json;
+                  try {
+                            resp = await fetchWithTimeout(url, {}, 30000);
+                            json = await resp.json();
+                  } catch (fetchErr) {
+                            console.error("[prezzi] Errore fetch batch Keepa:", fetchErr.message);
+                            // Salta il batch, non blocca gli altri
+                            batch.forEach(function(item) {
+                                        results.push({ asin: item.asin, modello: item.modello, taglio: item.taglio, prezzo: null, ts: ts, error: "fetch error" });
+                            });
+                            continue;
+                  }
+                  var products = (json && json.products) ? json.products : [];
+                  // Mappa asin -> prodotto
+                  var prodMap = {};
+                  products.forEach(function(p) { if (p && p.asin) prodMap[p.asin] = p; });
+                  batch.forEach(function(item) {
+                            var p = prodMap[item.asin];
+                            var prezzo = null;
+                            if (p && p.csv && Array.isArray(p.csv[KEEPA_CSV_ECCELLENTE])) {
+                                        prezzo = latestPriceFromCsv(p.csv[KEEPA_CSV_ECCELLENTE]);
+                            }
+                            results.push({ asin: item.asin, modello: item.modello, taglio: item.taglio, prezzo: prezzo, ts: ts });
+                  });
+          }
+          prezziCache.data = results;
+          prezziCache.ts = new Date().toISOString();
+          console.log("[prezzi] Cache aggiornata: " + results.length + " record, ts=" + prezziCache.ts);
+    } catch (err) {
+          console.error("[prezzi] Errore refresh cache:", err.message);
+    } finally {
+          prezziCache.loading = false;
+    }
 }
-app.get("/api/prezzi", async function(req, res) {
-    if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY not configured" });
-    var rawAsins = String(req.query.asins || "");
+
+// Job schedulato: aggiorna 2 volte al giorno (ogni 12 ore)
+setInterval(refreshPrezziCache, 12 * 60 * 60 * 1000);
+// Prima esecuzione all'avvio (dopo 5s per lasciar partire il server)
+setTimeout(refreshPrezziCache, 5000);
+
+// GET /api/prezzi — serve dalla cache, nessuna chiamata Keepa diretta
+app.get("/api/prezzi", function(req, res) {
     var condizione = String(req.query.condizione || "eccellente").toLowerCase().trim();
     var locale = String(req.query.locale || "IT").toUpperCase().trim();
-    var asins = rawAsins.split(",").map(function(a) { return a.trim().toUpperCase(); }).filter(function(a) { return isValidAsin(a); });
-    if (asins.length === 0) return res.status(400).json({ error: "Param 'asins' mancante o non valido (es. ?asins=B0CV123456)" });
-    if (asins.length > 20) return res.status(400).json({ error: "Massimo 20 ASIN per richiesta" });
-    var domain = LOCALE_TO_DOMAIN[locale];
-    if (!domain) return res.status(400).json({ error: "Locale non supportato: " + locale + ". Ammessi: IT, DE, FR, ES" });
-    var condKey = COND_MAP_PREZZI[condizione];
-    if (!condKey) return res.status(400).json({ error: "Condizione non supportata: " + condizione + ". Ammesse: eccellente, ottimo, buono, accettabile" });
-    var ts = new Date().toISOString().slice(0, 10);
-    var results = [];
-    await Promise.all(asins.map(async function(asin) {
-          try {
-                  var json = await callKeepa(asin, domain, true);
-                  var p = json && json.products && json.products[0];
-                  if (!p) { results.push({ asin: asin, modello: null, taglio: null, prezzo: null, ts: ts, error: "Prodotto non trovato" }); return; }
-                  var title = p.title || null, modello = title, taglio = null;
-                  if (title) { var m = title.match(/(\d+)\s*GB/i); if (m) { taglio = m[1] + "GB"; modello = title.replace(m[0], "").replace(/\s+/g, " ").trim(); } }
-                  var offers = Array.isArray(p.offers) ? p.offers : [];
-                  var prices = [];
-                  for (var i = 0; i < offers.length; i++) {
-                            var o = offers[i];
-                            if (keepaCondToKey(o.condition) === condKey) {
-                                        var pr = latestKeepaPrice(o.offerCSV);
-                                        if (pr !== null) prices.push(pr);
-                            }
-                  }
-                  results.push({ asin: asin, modello: modello, taglio: taglio, prezzo: prices.length > 0 ? Math.min.apply(null, prices) : null, ts: ts });
-          } catch (err) {
-                  results.push({ asin: asin, modello: null, taglio: null, prezzo: null, ts: ts, error: err.message });
-          }
-    }));
-    results.sort(function(a, b) { return a.asin.localeCompare(b.asin); });
-    res.json(results);
+    // Attualmente solo eccellente/IT supportati (lista fissa IT, csv[12])
+    if (locale !== "IT") {
+          return res.status(400).json({ error: "Locale non supportato: " + locale + ". Attualmente disponibile solo IT." });
+    }
+    if (condizione !== "eccellente" && condizione !== "excellent") {
+          return res.status(400).json({ error: "Condizione non supportata: " + condizione + ". Attualmente disponibile solo eccellente." });
+    }
+    if (!prezziCache.ts) {
+          return res.status(503).json({ error: "Cache non ancora disponibile, riprovare tra qualche secondo.", loading: prezziCache.loading });
+    }
+    res.json(prezziCache.data);
 });
+
+// GET /api/prezzi/refresh — forza aggiornamento manuale (richiede auth)
+app.get("/api/prezzi/refresh", async function(req, res) {
+    if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY non configurata" });
+    if (prezziCache.loading) return res.status(409).json({ error: "Refresh già in corso" });
+    // Avvia async senza aspettare
+    refreshPrezziCache().catch(function(e) { console.error("[prezzi/refresh]", e.message); });
+    res.json({ ok: true, message: "Refresh avviato, i dati saranno disponibili a breve su /api/prezzi" });
+});
+
 
 // HEALTH
 // =============================================================
