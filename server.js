@@ -862,65 +862,58 @@ var prezziCache = { data: [], ts: null, loading: false };
 // Keepa domain IT = 8
 const PREZZI_DOMAIN = 8;
 
-// CSV index 12 = "Used – Very Good" = "Eccellente" su Amazon IT
-// Indici Keepa csv[]: 11=New/LikeNew, 12=VeryGood(Eccellente), 13=Good, 14=Acceptable
-const KEEPA_CSV_ECCELLENTE = 12;
-
-// Estrae l'ultimo prezzo valido da un array CSV Keepa [time,price,time,price,...]
-// I prezzi Keepa sono in centesimi*100, -1 = esaurito. Ritorna float in EUR o null.
-function latestPriceFromCsv(csv) {
-    if (!Array.isArray(csv) || csv.length < 2) return null;
-    // Scorre al contrario cercando l'ultimo prezzo != -1
-    for (var i = csv.length - 1; i >= 1; i -= 2) {
-          var price = csv[i];
-          if (typeof price === "number" && price > 0) {
-                  return Math.round(price) / 100;
-          }
-    }
-    return null;
+// Mappa condizione Keepa (offer.condition intero) -> chiave interna
+// IDENTICA alla logica usata e validata in /api/keepa-offers
+function keepaCondToKey(c) {
+    if (c === 1 || c === 10) return "premium";   // Like New / Renewed
+    if (c === 2) return "excellent";             // Very Good = "Eccellente" IT
+    if (c === 3) return "very_good";             // Good
+    if (c === 4) return "good";                  // Acceptable
+    if (c === 5) return "acceptable";
+    return "unknown";
 }
 
-// Chiama Keepa in batch (max 20 ASIN per richiesta) e aggiorna la cache
+// Estrae il prezzo corrente da offerCSV Keepa [keepaTime, priceCents*100, ...]
+// Stesso helper del primo commit, già validato contro /api/keepa-offers
+function latestKeepaPrice(offerCSV) {
+    if (!Array.isArray(offerCSV) || offerCSV.length < 2) return null;
+    var v = offerCSV[offerCSV.length - 1];
+    return (typeof v === "number" && v > 0) ? Math.round(v) / 100 : null;
+}
+
+// Aggiorna la cache usando callKeepa con offerte (stessa logica di /api/keepa-offers)
+// Gli ASIN sono processati in gruppi concorrenti (BATCH) per ridurre il tempo totale.
 async function refreshPrezziCache() {
     if (!KEEPA_KEY) { console.warn("[prezzi] KEEPA_API_KEY non configurata, skip refresh"); return; }
     if (prezziCache.loading) { console.log("[prezzi] Refresh già in corso, skip"); return; }
     prezziCache.loading = true;
     console.log("[prezzi] Avvio refresh cache per " + PREZZI_ASIN_LIST.length + " ASIN...");
-    var BATCH = 20;
+    var BATCH = 10;
     var results = [];
     var ts = new Date().toISOString().slice(0, 10);
     try {
           for (var i = 0; i < PREZZI_ASIN_LIST.length; i += BATCH) {
                   var batch = PREZZI_ASIN_LIST.slice(i, i + BATCH);
-                  var asinStr = batch.map(function(x) { return x.asin; }).join(",");
-                  var url = "https://api.keepa.com/product?key=" + KEEPA_KEY +
-                                    "&domain=" + PREZZI_DOMAIN +
-                                    "&asin=" + asinStr +
-                                    "&stats=0&history=1&offers=0";
-                  var resp, json;
-                  try {
-                            resp = await fetchWithTimeout(url, {}, 30000);
-                            json = await resp.json();
-                  } catch (fetchErr) {
-                            console.error("[prezzi] Errore fetch batch Keepa:", fetchErr.message);
-                            // Salta il batch, non blocca gli altri
-                            batch.forEach(function(item) {
-                                        results.push({ asin: item.asin, modello: item.modello, taglio: item.taglio, prezzo: null, ts: ts, error: "fetch error" });
-                            });
-                            continue;
-                  }
-                  var products = (json && json.products) ? json.products : [];
-                  // Mappa asin -> prodotto
-                  var prodMap = {};
-                  products.forEach(function(p) { if (p && p.asin) prodMap[p.asin] = p; });
-                  batch.forEach(function(item) {
-                            var p = prodMap[item.asin];
-                            var prezzo = null;
-                            if (p && p.csv && Array.isArray(p.csv[KEEPA_CSV_ECCELLENTE])) {
-                                        prezzo = latestPriceFromCsv(p.csv[KEEPA_CSV_ECCELLENTE]);
+                  var batchResults = await Promise.all(batch.map(async function(item) {
+                            try {
+                                        var json = await callKeepa(item.asin, PREZZI_DOMAIN, true);
+                                        var p = json && json.products && json.products[0];
+                                        if (!p) return { asin: item.asin, modello: item.modello, taglio: item.taglio, prezzo: null, ts: ts, error: "prodotto non trovato" };
+                                        var offers = Array.isArray(p.offers) ? p.offers : [];
+                                        var prices = [];
+                                        for (var j = 0; j < offers.length; j++) {
+                                                      var o = offers[j];
+                                                      if (keepaCondToKey(o.condition) === "excellent") {
+                                                                      var pr = latestKeepaPrice(o.offerCSV);
+                                                                      if (pr !== null) prices.push(pr);
+                                                      }
+                                        }
+                                        return { asin: item.asin, modello: item.modello, taglio: item.taglio, prezzo: prices.length > 0 ? Math.min.apply(null, prices) : null, ts: ts };
+                            } catch (err) {
+                                        return { asin: item.asin, modello: item.modello, taglio: item.taglio, prezzo: null, ts: ts, error: err.message };
                             }
-                            results.push({ asin: item.asin, modello: item.modello, taglio: item.taglio, prezzo: prezzo, ts: ts });
-                  });
+                  }));
+                  results = results.concat(batchResults);
           }
           prezziCache.data = results;
           prezziCache.ts = new Date().toISOString();
@@ -937,16 +930,15 @@ setInterval(refreshPrezziCache, 12 * 60 * 60 * 1000);
 // Prima esecuzione all'avvio (dopo 5s per lasciar partire il server)
 setTimeout(refreshPrezziCache, 5000);
 
-// GET /api/prezzi — serve dalla cache, nessuna chiamata Keepa diretta
+// GET /api/prezzi — serve dalla cache, 0 token Keepa per chiamata esterna
 app.get("/api/prezzi", function(req, res) {
     var condizione = String(req.query.condizione || "eccellente").toLowerCase().trim();
     var locale = String(req.query.locale || "IT").toUpperCase().trim();
-    // Attualmente solo eccellente/IT supportati (lista fissa IT, csv[12])
     if (locale !== "IT") {
           return res.status(400).json({ error: "Locale non supportato: " + locale + ". Attualmente disponibile solo IT." });
     }
     if (condizione !== "eccellente" && condizione !== "excellent") {
-          return res.status(400).json({ error: "Condizione non supportata: " + condizione + ". Attualmente disponibile solo eccellente." });
+          return res.status(400).json({ error: "Condizione non supportata: " + condizione + ". Disponibile solo: eccellente." });
     }
     if (!prezziCache.ts) {
           return res.status(503).json({ error: "Cache non ancora disponibile, riprovare tra qualche secondo.", loading: prezziCache.loading });
@@ -958,11 +950,9 @@ app.get("/api/prezzi", function(req, res) {
 app.get("/api/prezzi/refresh", async function(req, res) {
     if (!KEEPA_KEY) return res.status(400).json({ error: "KEEPA_API_KEY non configurata" });
     if (prezziCache.loading) return res.status(409).json({ error: "Refresh già in corso" });
-    // Avvia async senza aspettare
     refreshPrezziCache().catch(function(e) { console.error("[prezzi/refresh]", e.message); });
     res.json({ ok: true, message: "Refresh avviato, i dati saranno disponibili a breve su /api/prezzi" });
 });
-
 
 // HEALTH
 // =============================================================
