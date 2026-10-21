@@ -181,7 +181,7 @@ function cellHtml(g) {
     h += `<div class="row"><span class="k">Box</span><span class="dim">non mostrato</span></div>`;
   }
   if (g.min) {
-    h += `<div class="row"><span class="k">Min</span><span>${eur(g.min.total)} · ${g.min.isRecover ? '<span class="rec">RECOVER</span>' : esc(g.min.seller)}${g.min.isFBA ? ' <span class="dim">FBA</span>' : ""} <span class="dim">(${g.offerte} off.)</span></span></div>`;
+    h += `<div class="row"><span class="k">Min</span><span>${eur(g.min.total)} · ${g.min.isRecover ? '<span class="rec">RECOVER</span>' : esc(g.min.seller || (g.min.daBox ? "= box" : "n.d."))}${g.min.isFBA ? ' <span class="dim">FBA</span>' : ""} <span class="dim">(${g.offerte} off.)</span></span></div>`;
   }
   if (g.recover) {
     const r = g.recover;
