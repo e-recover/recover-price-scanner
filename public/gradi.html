@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recover — Box per grado</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
+    --border: #2e3350; --accent: #4f8ef7; --accent-hover: #6da3ff;
+    --text: #e8eaf0; --muted: #8890aa; --danger: #f56565;
+    --success: #48bb78; --warn: #ed8936; --violet: #9f7aea; --teal: #38b2ac; --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  .tag-copia { background: var(--warn); color: #111; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; }
+  main { padding: 16px 20px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, input[type=text] { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 13px; min-width: 130px; }
+  .chk { flex-direction: row !important; align-items: center; gap: 6px !important; color: var(--text) !important; font-size: 13px !important; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; font-size: 13px; }
+  button:hover { background: var(--accent-hover); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.sec { background: var(--surface2); border: 1px solid var(--border); }
+  .info { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .info b { color: var(--text); }
+  .summary { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sum { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; user-select: none; }
+  .sum.on { outline: 2px solid var(--accent); }
+  .sum b { font-size: 15px; margin-right: 4px; }
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 8px; vertical-align: top; text-align: left; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
+  td.mod { white-space: nowrap; }
+  td.mod .m { font-weight: 600; }
+  td.mod .s { font-size: 12px; color: var(--muted); }
+  td.mod a { color: var(--accent); font-size: 12px; text-decoration: none; }
+  .lay { font-size: 10px; padding: 1px 6px; border-radius: 99px; border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
+  .lay.nuovo { border-color: var(--teal); color: var(--teal); }
+  .cell { font-size: 12px; min-width: 190px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 5px; margin-bottom: 4px; }
+  .b-RECOVER_BOX { background: var(--success); color: #0b1a10; }
+  .b-RECOVER_MIN_SENZA_BOX { background: var(--danger); color: #fff; }
+  .b-RECOVER_SOTTO { background: var(--warn); color: #1a0f00; }
+  .b-RECOVER_MIN { background: var(--teal); color: #031514; }
+  .b-BOX_DIVERSO_DA_MIN { background: var(--violet); color: #fff; }
+  .b-GRADO_SENZA_BOX, .b-LAYOUT_VECCHIO { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .b-OK { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .b-ERR { background: #5a1d1d; color: #fff; }
+  .row { display: flex; gap: 6px; }
+  .row .k { color: var(--muted); width: 34px; flex: none; }
+  .rec { color: var(--success); font-weight: 600; }
+  .neg { color: var(--danger); }
+  .dim { color: var(--muted); }
+  .empty { color: var(--muted); }
+  .progress { height: 4px; background: var(--surface2); border-radius: 4px; overflow: hidden; margin-top: 10px; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .legend { font-size: 12px; color: var(--muted); display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 14px; }
+  @media (max-width: 700px) { main, header { padding: 12px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Box per grado</h1>
+  <span class="tag-copia">COPIA DI SVILUPPO</span>
+  <a href="/">← Scanner principale</a>
+</header>
+<main>
+  <div class="panel">
+    <div class="controls">
+      <label>Mercato
+        <select id="mkt">
+          <option value="8|IT|4|https://www.amazon.it/dp/">🇮🇹 Amazon.it</option>
+          <option value="3|DE|5|https://www.amazon.de/dp/">🇩🇪 Amazon.de</option>
+          <option value="4|FR|6|https://www.amazon.fr/dp/">🇫🇷 Amazon.fr</option>
+          <option value="9|ES|7|https://www.amazon.es/dp/">🇪🇸 Amazon.es</option>
+        </select>
+      </label>
+      <label>Serie <select id="serie"></select></label>
+      <label>Modello <select id="modello"></select></label>
+      <label>Memoria <select id="memoria"></select></label>
+      <label>Cerca ASIN / colore <input type="text" id="q" placeholder="es. B0F54GZKP9"></label>
+      <label class="chk"><input type="checkbox" id="deep"> Lettura completa offerte (fino a 3× crediti)</label>
+      <label class="chk"><input type="checkbox" id="force"> Ignora cache (consuma crediti)</label>
+      <button id="go">Scansiona</button>
+      <button id="csv" class="sec" disabled>Esporta CSV</button>
+    </div>
+    <div class="info" id="info"></div>
+    <div class="progress"><div id="bar"></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="summary" id="summary"></div>
+  </div>
+
+  <div class="panel tbl-wrap">
+    <table>
+      <thead><tr><th>Modello</th><th>Premium</th><th>Eccellente</th><th>Buono</th><th>Accettabile</th></tr></thead>
+      <tbody id="tb"><tr><td colspan="5" class="empty">Seleziona i filtri e premi Scansiona. Ogni ASIN costa 1 chiamata Ninja (raramente 2–3); i risultati restano in cache 30 minuti.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel legend">
+    <div><span class="badge b-RECOVER_BOX">Recover ha il box</span> Recover è l'offerta in evidenza del grado</div>
+    <div><span class="badge b-RECOVER_MIN_SENZA_BOX">Recover più basso, senza box</span> Recover è al minimo ma il box è di altri o non viene mostrato: verificare idoneità offerta</div>
+    <div><span class="badge b-RECOVER_SOTTO">Recover sopra</span> Recover presente ma più caro del minimo / del box</div>
+    <div><span class="badge b-RECOVER_MIN">Recover più basso</span> Layout vecchio: Recover al minimo del grado</div>
+    <div><span class="badge b-BOX_DIVERSO_DA_MIN">Box ≠ minimo</span> Il box del grado non è l'offerta più economica</div>
+    <div><span class="badge b-GRADO_SENZA_BOX">Grado senza box</span> Offerte presenti ma Amazon non mostra il box del grado</div>
+    <div><span class="badge b-LAYOUT_VECCHIO">Layout vecchio</span> Amazon mostra ancora la Buy Box unica su questo ASIN</div>
+    <div><span class="badge b-OK">OK</span> Box = minimo, Recover non presente nel grado</div>
+  </div>
+</main>
+
+<script>
+const GRADES = [["premium","Premium"],["excellent","Eccellente"],["good","Buono"],["acceptable","Accettabile"]];
+const STATO_LABEL = {
+  RECOVER_BOX: "Recover ha il box", RECOVER_MIN_SENZA_BOX: "Recover più basso, senza box",
+  RECOVER_SOTTO: "Recover sopra", RECOVER_MIN: "Recover più basso", BOX_DIVERSO_DA_MIN: "Box ≠ minimo",
+  GRADO_SENZA_BOX: "Grado senza box", LAYOUT_VECCHIO: "Layout vecchio", OK: "OK", VUOTO: ""
+};
+const CRITICI = ["RECOVER_MIN_SENZA_BOX", "RECOVER_SOTTO"];
+let CATALOG = [], RESULTS = [], FILTER = null;
+
+const $ = id => document.getElementById(id);
+const eur = n => n === null || n === undefined ? "—" : n.toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Il catalogo è letto dall'index.html dello scanner principale: unica fonte, nessun doppione da mantenere.
+async function loadCatalog() {
+  const html = await (await fetch("/index.html")).text();
+  const s = html.indexOf("const CATALOG = [");
+  const e = html.indexOf("];", s);
+  const body = html.slice(s + "const CATALOG = ".length, e + 1).replace(/,\s*\]$/, "]");
+  CATALOG = JSON.parse(body);
+}
+
+function uniq(a) { return [...new Set(a)]; }
+function fillSelect(el, values, all) {
+  el.innerHTML = `<option value="">${all}</option>` + values.map(v => `<option>${esc(v)}</option>`).join("");
+}
+function refreshFilters(level) {
+  const s = $("serie").value, m = $("modello").value;
+  if (level <= 0) fillSelect($("serie"), uniq(CATALOG.map(r => r[0])), "Tutte");
+  if (level <= 1) fillSelect($("modello"), uniq(CATALOG.filter(r => !$("serie").value || r[0] === $("serie").value).map(r => r[1])), "Tutti");
+  if (level <= 2) fillSelect($("memoria"), uniq(CATALOG.filter(r => (!$("serie").value || r[0] === $("serie").value) && (!$("modello").value || r[1] === $("modello").value)).map(r => r[2])), "Tutte");
+  updateInfo();
+}
+function mkt() { const [domain, code, idx, url] = $("mkt").value.split("|"); return { domain: +domain, code, idx: +idx, url }; }
+function selectedRows() {
+  const { idx } = mkt(), q = $("q").value.trim().toLowerCase();
+  return CATALOG.filter(r =>
+    (!$("serie").value || r[0] === $("serie").value) &&
+    (!$("modello").value || r[1] === $("modello").value) &&
+    (!$("memoria").value || r[2] === $("memoria").value) &&
+    (!q || (r[idx] || "").toLowerCase().includes(q) || r[3].toLowerCase().includes(q)) &&
+    /^[A-Z0-9]{10}$/.test(r[idx] || ""));
+}
+async function updateInfo(extra) {
+  const rows = selectedRows();
+  const asins = uniq(rows.map(r => r[mkt().idx]));
+  let st = "";
+  try { const s = await (await fetch("/api/grades-stats")).json(); st = ` · Chiamate Ninja da avvio server: <b>${s.ninjaCalls}</b> (cache usata ${s.cacheHits} volte)`; } catch (e) {}
+  $("info").innerHTML = `Selezionati <b>${asins.length}</b> ASIN → stima <b>${asins.length}</b> chiamate Ninja (max ${asins.length * 3}), meno quelli già in cache.${st}${extra ? " · " + extra : ""}`;
+}
+
+function cellHtml(g) {
+  if (!g) return '<span class="empty">—</span>';
+  if (g.stato === "VUOTO") return '<span class="empty">nessuna offerta</span>';
+  let h = `<span class="badge b-${g.stato}">${STATO_LABEL[g.stato]}</span>`;
+  if (g.box) {
+    const who = g.box.isRecover ? '<span class="rec">RECOVER</span>' : esc(g.box.seller || "venditore n.d.") + (g.box.match === "ambiguo" ? ' <span class="dim">(parità)</span>' : "");
+    h += `<div class="row"><span class="k">Box</span><span>${eur(g.box.price)}${g.box.deliveryFee ? ' <span class="dim">+' + eur(g.box.deliveryFee) + '</span>' : ""} · ${who}</span></div>`;
+  } else {
+    h += `<div class="row"><span class="k">Box</span><span class="dim">non mostrato</span></div>`;
+  }
+  if (g.min) {
+    h += `<div class="row"><span class="k">Min</span><span>${eur(g.min.total)} · ${g.min.isRecover ? '<span class="rec">RECOVER</span>' : esc(g.min.seller)}${g.min.isFBA ? ' <span class="dim">FBA</span>' : ""} <span class="dim">(${g.offerte} off.)</span></span></div>`;
+  }
+  if (g.recover) {
+    const r = g.recover;
+    let gap = "";
+    if (r.gapMin > 0) gap = ` <span class="neg">+${eur(r.gapMin)} sul min</span>`;
+    if (r.tetto) gap += ` <span class="dim">· tetto ${eur(r.tetto)}</span>`;
+    h += `<div class="row"><span class="k">Rec</span><span>${eur(r.total)} · pos ${r.posizione}/${r.su}${gap}</span></div>`;
+  }
+  return h;
+}
+
+function render() {
+  const { idx, url } = mkt();
+  const counts = {};
+  RESULTS.forEach(x => x.res && x.res.ok && GRADES.forEach(([k]) => { const s = x.res.grades[k].stato; counts[s] = (counts[s] || 0) + 1; }));
+  const nErr = RESULTS.filter(x => x.res && !x.res.ok).length;
+  $("summary").innerHTML = ["RECOVER_BOX", "RECOVER_MIN_SENZA_BOX", "RECOVER_SOTTO", "RECOVER_MIN", "BOX_DIVERSO_DA_MIN", "GRADO_SENZA_BOX", "LAYOUT_VECCHIO"]
+    .map(s => `<span class="sum ${FILTER === s ? "on" : ""}" data-s="${s}"><b>${counts[s] || 0}</b>${STATO_LABEL[s]}</span>`).join("")
+    + `<span class="sum ${FILTER === "CRIT" ? "on" : ""}" data-s="CRIT"><b>${(counts.RECOVER_MIN_SENZA_BOX || 0) + (counts.RECOVER_SOTTO || 0)}</b>Solo criticità Recover</span>`
+    + (nErr ? `<span class="sum"><b class="neg">${nErr}</b>errori</span>` : "");
+  document.querySelectorAll(".sum[data-s]").forEach(el => el.onclick = () => { FILTER = FILTER === el.dataset.s ? null : el.dataset.s; render(); });
+
+  const rows = RESULTS.filter(x => {
+    if (!FILTER) return true;
+    if (!x.res || !x.res.ok) return false;
+    const st = GRADES.map(([k]) => x.res.grades[k].stato);
+    return FILTER === "CRIT" ? st.some(s => CRITICI.includes(s)) : st.includes(FILTER);
+  });
+  $("tb").innerHTML = rows.map(x => {
+    const r = x.row, asin = r[idx], res = x.res;
+    const lay = res && res.ok ? `<span class="lay ${res.layout}">layout ${res.layout}</span>` : "";
+    const meta = res && res.ok ? `<div class="s">${res.offersFetched}/${res.offersTotal ?? "?"} offerte lette${res.complete ? "" : ' <span title="Minimo calcolato sulle offerte lette: usa Lettura completa per il minimo certo">⚠︎ parziale</span>'}${res.cached ? " · cache" : ""}</div>` : "";
+    const head = `<td class="mod"><div class="m">${esc(r[1])} ${esc(r[2])}</div><div class="s">${esc(r[3])}${lay}</div><a href="${url}${asin}" target="_blank" rel="noopener">${asin} ↗</a>${meta}</td>`;
+    if (!res) return `<tr>${head}<td colspan="4" class="dim">in coda…</td></tr>`;
+    if (!res.ok) return `<tr>${head}<td colspan="4"><span class="badge b-ERR">Errore</span> ${esc(res.error)}</td></tr>`;
+    return `<tr>${head}${GRADES.map(([k]) => `<td class="cell">${cellHtml(res.grades[k])}</td>`).join("")}</tr>`;
+  }).join("") || '<tr><td colspan="5" class="empty">Nessuna riga per il filtro selezionato.</td></tr>';
+}
+
+async function scan() {
+  const { idx, domain } = mkt();
+  const rows = selectedRows();
+  if (!rows.length) return;
+  if (rows.length > 40 && !confirm(`Stai per scansionare ${rows.length} ASIN (circa ${rows.length} chiamate Ninja se non in cache). Procedere?`)) return;
+  $("go").disabled = true; $("csv").disabled = true; FILTER = null;
+  RESULTS = rows.map(row => ({ row, res: null }));
+  render();
+  const force = $("force").checked, deep = $("deep").checked;
+  let done = 0, calls = 0;
+  for (let i = 0; i < RESULTS.length; i += 10) {
+    const chunk = RESULTS.slice(i, i + 10);
+    try {
+      const r = await fetch("/api/grades-bulk", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force, deep, items: chunk.map(x => ({ asin: x.row[idx], domain })) }) });
+      const j = await r.json();
+      calls += j.ninjaCalls || 0;
+      chunk.forEach((x, k) => x.res = (j.results && j.results[k]) || { ok: false, error: j.error || "risposta vuota" });
+    } catch (e) {
+      chunk.forEach(x => x.res = { ok: false, error: e.message });
+    }
+    done += chunk.length;
+    $("bar").style.width = (done / RESULTS.length * 100) + "%";
+    render();
+  }
+  $("go").disabled = false; $("csv").disabled = false;
+  updateInfo(`ultima scansione: <b>${calls}</b> chiamate Ninja consumate`);
+}
+
+function exportCsv() {
+  const { idx, code } = mkt();
+  const head = ["Mercato", "Modello", "Memoria", "Colore", "ASIN", "Layout", "Grado", "Stato", "Box prezzo", "Box venditore", "Box Recover", "Min totale", "Min venditore", "Recover totale", "Recover posizione", "Recover gap min", "Recover tetto"];
+  const lines = [head];
+  RESULTS.forEach(x => {
+    if (!x.res || !x.res.ok) return;
+    GRADES.forEach(([k, label]) => {
+      const g = x.res.grades[k];
+      if (g.stato === "VUOTO") return;
+      lines.push([code, x.row[1], x.row[2], x.row[3], x.row[idx], x.res.layout, label, STATO_LABEL[g.stato],
+        g.box ? g.box.price : "", g.box ? (g.box.seller || "") : "", g.box && g.box.isRecover ? "SI" : "",
+        g.min ? g.min.total : "", g.min ? g.min.seller : "",
+        g.recover ? g.recover.total : "", g.recover ? `${g.recover.posizione}/${g.recover.su}` : "",
+        g.recover ? g.recover.gapMin : "", g.recover && g.recover.tetto ? g.recover.tetto : ""]);
+    });
+  });
+  const csv = lines.map(l => l.map(v => typeof v === "number" ? String(v).replace(".", ",") : `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+  a.download = `box-per-grado_${code}_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+(async function init() {
+  try { await loadCatalog(); } catch (e) { $("info").textContent = "Errore lettura catalogo da index.html: " + e.message; return; }
+  refreshFilters(0);
+  $("serie").onchange = () => refreshFilters(1);
+  $("modello").onchange = () => refreshFilters(2);
+  $("memoria").onchange = () => updateInfo();
+  $("mkt").onchange = () => { RESULTS = []; render(); updateInfo(); };
+  $("q").oninput = () => updateInfo();
+  $("go").onclick = scan;
+  $("csv").onclick = exportCsv;
+})();
+</script>
+</body>
+</html>
