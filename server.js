@@ -4,6 +4,7 @@
 //   /api/health, /api/keepa, /api/keepa-offers, /api/serpapi,
 //   /api/ninja, /api/scan-asin, /api/bulk-scan, /api/scan-asin-deep,
 //   /api/backmarket/listings, /api/backmarket/all, /api/bulk-price
+//   /api/grades, /api/grades-bulk, /api/grades-stats  (grades.js)
 // =============================================================
 
 const express = require("express");
@@ -976,6 +977,11 @@ app.get("/api/health", (req, res) => {
     time: new Date().toISOString(),
   });
 });
+
+// =============================================================
+// BOX PER GRADO (nuovo layout Amazon) — modulo separato grades.js
+// =============================================================
+require("./grades").mountGrades(app, { fetchWithTimeout: fetchWithTimeout, ninjaKey: NINJA_KEY });
 
 app.listen(PORT, function () {
   console.log(`Recover Price Scanner running on port ${PORT}`);
