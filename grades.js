@@ -157,8 +157,14 @@ function analyze(asin, domain, first, offers, meta) {
   const out = {};
   GRADES.forEach(function (g) {
     const list = offers.filter(o => o.grade === g && o.total !== null).sort((a, b) => a.total - b.total);
-    const min = list[0] || null;
     const box = boxes[g] || null;
+    let min = list[0] || null;
+    // Il minimo non può essere più alto del box: se l'offerta del box non è tra quelle lette,
+    // il minimo del grado è almeno il prezzo del box (venditore eventualmente n.d.)
+    if (box && (!min || box.price < min.price - EPS)) {
+      min = { price: box.price, deliveryFee: box.deliveryFee || 0, total: box.total !== null ? box.total : box.price,
+              seller: box.seller, sellerId: box.sellerId, isFBA: box.isFBA, isRecover: box.isRecover, daBox: true };
+    }
     const recIdx = list.findIndex(o => o.isRecover);
     const rec = recIdx >= 0 ? list[recIdx] : null;
     const nextComp = rec ? list.find(o => !o.isRecover) || null : null;
@@ -189,7 +195,7 @@ function analyze(asin, domain, first, offers, meta) {
     out[g] = {
       stato: stato,
       box: box,
-      min: min ? { price: min.price, deliveryFee: min.deliveryFee, total: min.total, seller: min.seller, sellerId: min.sellerId, isFBA: min.isFBA, isRecover: min.isRecover } : null,
+      min: min ? { price: min.price, deliveryFee: min.deliveryFee, total: min.total, seller: min.seller, sellerId: min.sellerId, isFBA: min.isFBA, isRecover: min.isRecover, daBox: !!min.daBox } : null,
       recover: recover,
       offerte: list.length,
     };
@@ -236,10 +242,15 @@ async function scanGrades(fetchFn, key, asin, domain, opts) {
     if (opts.deep) return true;
     const offers = raw.map(normOffer);
     const boxes = Array.isArray(first.buy_boxes) ? first.buy_boxes : [];
-    // un grado con box senza nessuna offerta in lista → serve la pagina dopo
+    const main = first.main_buy_box || {};
+    // serve la pagina dopo se il venditore di un box non è tra le offerte lette
+    // (box principale escluso: il venditore lo dà già Ninja)
     return boxes.some(b => {
       const g = classifyCondition(b.title);
-      return GRADES.includes(g) && !offers.some(o => o.grade === g);
+      if (!GRADES.includes(g)) return false;
+      const bp = parsePrice(b.price);
+      if (main.seller_id && classifyCondition(main.title) === g && Math.abs(parsePrice(main.price) - bp) < EPS) return false;
+      return !offers.some(o => o.grade === g && o.price !== null && Math.abs(o.price - bp) < EPS);
     });
   }
 
