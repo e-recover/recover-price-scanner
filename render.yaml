@@ -1,0 +1,20 @@
+# Configurazione SOLO per la copia di sviluppo (branch box-per-grado).
+# Il servizio principale "recover-price-scanner" su main NON è toccato.
+services:
+  - type: web
+    name: recover-price-scanner-copia
+    runtime: node
+    repo: https://github.com/e-recover/recover-price-scanner
+    branch: box-per-grado
+    plan: free
+    region: ohio
+    buildCommand: npm install
+    startCommand: node server.js
+    autoDeploy: true
+    envVars:
+      - key: NINJA_KEY
+        sync: false
+      - key: BASIC_AUTH_USER
+        sync: false
+      - key: BASIC_AUTH_PASS
+        sync: false
